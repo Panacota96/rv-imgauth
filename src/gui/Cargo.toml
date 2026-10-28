@@ -23,6 +23,10 @@ serde_json.workspace = true
 # Image viewer: decode the PNG maps written by the core.
 png.workspace = true
 
+[dev-dependencies]
+# Example `viewer_screenshot` only: decodes the sample JPEG when the analysis wrote no original preview.
+rv-imgauth-img.workspace = true
+
 # Native file/folder pickers on Windows (no GTK/portal dependency elsewhere: a text field is used instead).
 [target.'cfg(windows)'.dependencies]
 rfd.workspace = true

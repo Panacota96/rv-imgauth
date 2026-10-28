@@ -17,8 +17,8 @@ pub const ELA_QUALITY_RANGE: RangeInclusive<u8> = 1..=100;
 pub const MAX_PIXELS_RANGE: RangeInclusive<u64> = 1_000_000..=2_000_000_000;
 pub const TIMEOUT_RANGE: RangeInclusive<u64> = 10..=3600;
 pub const MEMORY_RANGE: RangeInclusive<u64> = 256..=65536;
-/// Analysis maps the user can select (CLI `--maps`).
-pub const MAP_KINDS: [&str; 2] = ["ela", "noise"];
+/// Analysis maps the user can select (CLI `--maps`), in canonical order.
+pub const MAP_KINDS: [&str; 3] = ["ela", "noise", "ghosts"];
 
 /// One change in section "3. Options"; each maps 1:1 onto a [`DomainOptions`] field and is audited as
 /// `ui_<name>_changed` (see [`OptionChange::audit_name`]).
@@ -29,8 +29,9 @@ pub enum OptionChange {
     CopyMove(bool),
     ElaQuality(u8),
     MaxPixels(u64),
-    /// Reference images, separated by ';'; empty = none.
-    References(String),
+    /// Reference images (known originals from the same device); empty = none. Blank entries and
+    /// duplicates are dropped, the order is kept.
+    References(Vec<PathBuf>),
     WorkerTimeout(u64),
     WorkerMemory(u64),
     /// Extra fingerprint database (JSON); empty = none.
@@ -149,7 +150,8 @@ pub struct GuiState {
     pub options: DomainOptions,
     /// Text of the fingerprint DB field while it is being edited (applied on focus loss / Browse).
     pub fp_db_entry: String,
-    /// Text of the reference images field while it is being edited (paths separated by ';').
+    /// Text of the reference image field while it is being typed (added to the list with "Add"; several
+    /// paths may be separated by ';').
     pub references_entry: String,
     pub results: Vec<ResultRow>,
     pub viewer: Viewer,
@@ -356,18 +358,15 @@ impl GuiState {
                 let v = (*v).clamp(*MAX_PIXELS_RANGE.start(), *MAX_PIXELS_RANGE.end());
                 (put(&mut o.max_pixels, v), json!(v))
             }
-            OptionChange::References(text) => {
-                let list: Vec<PathBuf> = text
-                    .split(';')
-                    .map(|p| p.trim().trim_matches('"'))
-                    .filter(|p| !p.is_empty())
-                    .map(PathBuf::from)
-                    .collect();
-                self.references_entry = list
-                    .iter()
-                    .map(|p| p.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join("; ");
+            OptionChange::References(paths) => {
+                let mut list: Vec<PathBuf> = vec![];
+                for p in paths {
+                    let t = p.to_string_lossy();
+                    let t = t.trim().trim_matches('"');
+                    if !t.is_empty() && !list.iter().any(|x| x.as_os_str() == t) {
+                        list.push(PathBuf::from(t));
+                    }
+                }
                 let shown: Vec<String> = list.iter().map(|p| p.display().to_string()).collect();
                 (put(&mut o.references, list), json!(shown))
             }
@@ -397,6 +396,33 @@ impl GuiState {
             self.note(c.audit_name(), json!({"value": value}));
         }
         changed
+    }
+
+    /// Adds reference images (picker or typed paths); already listed ones are ignored.
+    pub fn add_references(&mut self, paths: impl IntoIterator<Item = PathBuf>) -> bool {
+        let mut all = self.options.references.clone();
+        all.extend(paths);
+        self.set_option(OptionChange::References(all))
+    }
+
+    /// "Add" next to the reference field: the typed path(s), separated by ';', are added to the list.
+    pub fn add_typed_references(&mut self) -> bool {
+        let typed: Vec<PathBuf> = self
+            .references_entry
+            .split(';')
+            .map(|p| PathBuf::from(p.trim().trim_matches('"')))
+            .collect();
+        self.references_entry.clear();
+        self.add_references(typed)
+    }
+
+    pub fn remove_reference(&mut self, i: usize) -> bool {
+        if i >= self.options.references.len() {
+            return false;
+        }
+        let mut all = self.options.references.clone();
+        all.remove(i);
+        self.set_option(OptionChange::References(all))
     }
 
     /// The analysis options handed to the core: the user's choices, with the image analysis in a worker
@@ -759,6 +785,7 @@ impl GuiState {
     /// Fills the results table and the image viewer from the core's summary.
     pub fn load_results(&mut self, summary: &RunSummary) {
         self.viewer = Viewer::from_results(&summary.results, &summary.report_dir);
+        self.viewer.run_id = summary.run_id.clone();
         self.results = summary
             .results
             .iter()
@@ -771,7 +798,7 @@ impl GuiState {
                 maps: r
                     .outputs
                     .iter()
-                    .filter(|o| o.rel_path.starts_with("maps/"))
+                    .filter(|o| is_overlay_map(&o.rel_path))
                     .count(),
                 evidence_id: r.evidence_id.clone(),
                 viewer_item: self.viewer.item_for_index(r.index),
@@ -783,7 +810,73 @@ impl GuiState {
     pub fn open_viewer(&mut self, row: usize) {
         if let Some(i) = self.results.get(row).and_then(|r| r.viewer_item) {
             self.viewer.open_item(i);
+            self.audit_map_view();
         }
+    }
+
+    /// Selector label of a map in the interface language ("ELA", "Noise σ", "JPEG ghost q60"…).
+    pub fn map_label(&self, m: &MapView) -> String {
+        match m.family {
+            MapFamily::Ghost(q) => format!("{} q{q}", self.tr("map_label_ghost")),
+            MapFamily::Other => m.name().to_string(),
+            f => self.tr(&format!("map_label_{}", f.key())),
+        }
+    }
+
+    /// The parameters recorded with the selected map, as "key: value" lines (sorted by key).
+    pub fn map_params_lines(&self) -> Vec<String> {
+        self.viewer
+            .current_map()
+            .map(|m| m.params.iter().map(|(k, v)| format!("{k}: {v}")).collect())
+            .unwrap_or_default()
+    }
+
+    /// The `ui_map_viewed` entry for what the viewer shows now; None when no map is shown.
+    pub fn map_view_event(&self) -> Option<(&'static str, Value)> {
+        let v = &self.viewer;
+        if !v.open {
+            return None;
+        }
+        let it = v.current_item()?;
+        let m = v.current_map()?;
+        let digest = v
+            .map_digest()
+            .map(|(a, h)| json!({"algorithm": a, "value": h}))
+            .unwrap_or(Value::Null);
+        Some((
+            "ui_map_viewed",
+            json!({
+                "item": it.name, "index": it.index, "evidence_id": it.evidence_id,
+                "map": m.rel_path, "map_kind": m.family.key(), "mode": v.mode.key(),
+                "opacity": if v.mode == ViewMode::Blend { json!((v.opacity * 100.0).round() / 100.0) } else { Value::Null },
+                "original_shown": it.original.is_some(),
+                "map_digest": digest, "run_id": v.run_id,
+            }),
+        ))
+    }
+
+    /// Records `ui_map_viewed` once per (item, map, mode) shown; called after every viewer interaction.
+    /// Goes through the GUI audit hook ([`GuiState::note`]): the entry is written, with its time, to the
+    /// audit log of the next run started from this window (a closed run's log is never appended to: the case
+    /// check refuses entries after `run_finished`). `run_id` names the run whose map was viewed.
+    pub fn audit_map_view(&mut self) -> bool {
+        let Some((action, details)) = self.map_view_event() else {
+            return false;
+        };
+        let v = &self.viewer;
+        let key = (
+            v.current_item().map_or(0, |i| i.index),
+            v.current_map()
+                .map(|m| m.rel_path.clone())
+                .unwrap_or_default(),
+            v.mode,
+        );
+        if v.last_viewed.as_ref() == Some(&key) {
+            return false;
+        }
+        self.viewer.last_viewed = Some(key);
+        self.note(action, details);
+        true
     }
 
     /// Findings of the viewer's item in the interface language, most severe first.
@@ -878,16 +971,19 @@ impl GuiState {
 
 // ---------------------------------------------------------------------------------------------------------
 // Image viewer: model built from `RunSummary::results` (ItemResult.details / outputs), no drawing code here.
-// Left: the original (a PNG preview written by the analysis), right: the selected overlay map; both share one
-// zoom and pan, so the same region of the image stays under the cursor on both sides.
+// Original | overlay side by side (one shared zoom and pan, so the same region stays under the cursor on both
+// sides), or the overlay blended over the original with an opacity. Maps may be smaller than the original
+// (copy-move and σ are downscaled): every map is stretched onto the original's frame.
 // ---------------------------------------------------------------------------------------------------------
 
 /// Zoom is relative to "fit the panel" (1.0).
 pub const ZOOM_MIN: f32 = 0.5;
 pub const ZOOM_MAX: f32 = 16.0;
 pub const ZOOM_STEP: f32 = 1.25;
-/// Output kind of the original's preview (a PNG written by the analysis under `maps/`; planned).
-pub const ORIGINAL_KIND: &str = "original_preview";
+/// Lossless preview of the decoded original, written by the analysis (absent for HEIC and undecodable files).
+pub const ORIGINAL_PREVIEW: &str = "maps/original.png";
+/// Default overlay opacity in blend mode.
+pub const DEFAULT_OPACITY: f32 = 0.5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct FindingText {
@@ -898,19 +994,84 @@ pub struct FindingText {
     pub not_proves: String,
 }
 
+/// What a map file shows, from its file name (`imgscan` names them). The order is the selector's order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MapFamily {
+    Ela,
+    Noise,
+    NoiseSigma,
+    CopyMove,
+    /// JPEG ghost at this re-compression quality.
+    Ghost(u8),
+    ThumbnailDiff,
+    #[default]
+    Other,
+}
+
+impl MapFamily {
+    pub fn from_file(rel: &str) -> MapFamily {
+        let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
+        let stem = name.strip_suffix(".png").unwrap_or(&name);
+        match stem {
+            "ela" => MapFamily::Ela,
+            "noise" => MapFamily::Noise,
+            "noise-sigma" => MapFamily::NoiseSigma,
+            "copymove" => MapFamily::CopyMove,
+            "thumbnail-diff" => MapFamily::ThumbnailDiff,
+            s => s
+                .strip_prefix("ghost-q")
+                .and_then(|q| q.parse::<u8>().ok())
+                .map_or(MapFamily::Other, MapFamily::Ghost),
+        }
+    }
+
+    /// Language-neutral name used in the audit log ("ela", "ghost_q60"…).
+    pub fn key(&self) -> String {
+        match self {
+            MapFamily::Ela => "ela".into(),
+            MapFamily::Noise => "noise".into(),
+            MapFamily::NoiseSigma => "noise_sigma".into(),
+            MapFamily::CopyMove => "copy_move".into(),
+            MapFamily::Ghost(q) => format!("ghost_q{q}"),
+            MapFamily::ThumbnailDiff => "thumbnail_diff".into(),
+            MapFamily::Other => "other".into(),
+        }
+    }
+}
+
 /// One overlay map written by the analysis (a PNG under `maps/`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MapView {
     /// Path relative to the item folder, e.g. `maps/ela.png`.
     pub rel_path: String,
-    /// Output kind, e.g. `ela_map`.
+    /// Output kind, e.g. `map`.
     pub kind: String,
+    pub family: MapFamily,
+    /// Parameters recorded with the map (`details.maps[].params`), shown under it.
+    pub params: BTreeMap<String, String>,
 }
 
 impl MapView {
-    /// File name shown in the selector ("ela.png").
+    /// File name ("ela.png").
     pub fn name(&self) -> &str {
         self.rel_path.rsplit('/').next().unwrap_or(&self.rel_path)
+    }
+}
+
+/// Side by side (original | overlay) or the overlay blended over the original.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ViewMode {
+    #[default]
+    SideBySide,
+    Blend,
+}
+
+impl ViewMode {
+    pub fn key(&self) -> &'static str {
+        match self {
+            ViewMode::SideBySide => "side_by_side",
+            ViewMode::Blend => "blend",
+        }
     }
 }
 
@@ -925,12 +1086,21 @@ pub struct ViewItem {
     /// `<report dir>/items/<NNNNN-name>/`
     pub dir: PathBuf,
     pub findings: Vec<Finding>,
-    /// `details.image_analysis`: not_implemented / completed / not_completed.
+    /// `details.image_analysis`: completed / not_completed / not_an_image.
     pub analysis_status: String,
+    /// `details.format` (jpeg, png, webp, heif).
+    pub format: Option<String>,
+    /// `details.width` × `details.height`: the frame every map is scaled to.
+    pub frame: Option<[u32; 2]>,
+    /// The pixels could not be decoded (`details.pixel_decode_error`).
+    pub pixel_decode_error: bool,
     /// The original's preview (relative path), when the analysis wrote one.
     pub original: Option<String>,
-    /// Overlay maps (PNG files under `maps/`), in the order the analysis listed them.
+    /// Overlay maps (PNG files under `maps/`), ELA, noise, σ, copy-move, ghosts by quality, thumbnail diff.
     pub maps: Vec<MapView>,
+    /// `structure.json` / `metadata.json` (relative paths), when written.
+    pub structure: Option<String>,
+    pub metadata: Option<String>,
     /// Audited digest of every output file: rel_path -> (algorithm, hex).
     pub digests: BTreeMap<String, (String, String)>,
 }
@@ -945,6 +1115,15 @@ pub struct Viewer {
     pub zoom: f32,
     /// Offset from the centred position, in panel pixels (shared by both sides: synchronised pan).
     pub pan: [f32; 2],
+    pub mode: ViewMode,
+    /// Overlay opacity in blend mode, 0.0..=1.0.
+    pub opacity: f32,
+    /// Filter typed above the metadata table.
+    pub meta_filter: String,
+    /// Run whose results are shown (named in `ui_map_viewed`).
+    pub run_id: String,
+    /// Last (item index, map, mode) written as `ui_map_viewed`, so one view is audited once.
+    pub last_viewed: Option<(u64, String, ViewMode)>,
 }
 
 impl Default for Viewer {
@@ -956,6 +1135,11 @@ impl Default for Viewer {
             map: 0,
             zoom: 1.0,
             pan: [0.0, 0.0],
+            mode: ViewMode::SideBySide,
+            opacity: DEFAULT_OPACITY,
+            meta_filter: String::new(),
+            run_id: String::new(),
+            last_viewed: None,
         }
     }
 }
@@ -964,12 +1148,63 @@ fn is_png(rel: &str) -> bool {
     rel.to_ascii_lowercase().ends_with(".png")
 }
 
+/// The original's preview, whatever kind the analysis gives it.
+pub fn is_original_preview(rel: &str) -> bool {
+    rel.eq_ignore_ascii_case(ORIGINAL_PREVIEW)
+}
+
+/// Overlay maps of an item's outputs (PNG files under `maps/`, the original's preview excluded).
+pub fn is_overlay_map(rel: &str) -> bool {
+    rel.starts_with("maps/") && is_png(rel) && !is_original_preview(rel)
+}
+
 impl ViewItem {
     pub fn from_result(r: &ItemResult, report_dir: &Path) -> ViewItem {
-        let pngs = r
+        let d = &r.details;
+        // Parameters recorded per map: details.maps = [{"file": "maps/ela.png", "params": {...}}].
+        let params: BTreeMap<String, BTreeMap<String, String>> = d["maps"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                let file = m["file"].as_str()?.to_string();
+                let p = m["params"]
+                    .as_object()
+                    .map(|o| {
+                        o.iter()
+                            .map(|(k, v)| {
+                                (
+                                    k.clone(),
+                                    v.as_str()
+                                        .map(String::from)
+                                        .unwrap_or_else(|| v.to_string()),
+                                )
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                Some((file, p))
+            })
+            .collect();
+        let mut maps: Vec<MapView> = r
             .outputs
             .iter()
-            .filter(|o| o.rel_path.starts_with("maps/") && is_png(&o.rel_path));
+            .filter(|o| is_overlay_map(&o.rel_path))
+            .map(|o| MapView {
+                rel_path: o.rel_path.clone(),
+                kind: o.kind.clone(),
+                family: MapFamily::from_file(&o.rel_path),
+                params: params.get(&o.rel_path).cloned().unwrap_or_default(),
+            })
+            .collect();
+        maps.sort_by_key(|m| m.family);
+        let find = |kind: &str| {
+            r.outputs
+                .iter()
+                .find(|o| o.kind == kind)
+                .map(|o| o.rel_path.clone())
+        };
+        let dim = |k: &str| d[k].as_u64().and_then(|v| u32::try_from(v).ok());
         ViewItem {
             index: r.index,
             name: r.file_name(),
@@ -977,21 +1212,21 @@ impl ViewItem {
             case_status: r.case_status.clone(),
             dir: report_dir.join("items").join(r.folder()),
             findings: r.findings.clone(),
-            analysis_status: r.details["image_analysis"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string(),
-            original: pngs
-                .clone()
-                .find(|o| o.kind == ORIGINAL_KIND)
+            analysis_status: d["image_analysis"].as_str().unwrap_or_default().to_string(),
+            format: d["format"].as_str().map(String::from),
+            frame: dim("width")
+                .zip(dim("height"))
+                .filter(|(w, h)| *w > 0 && *h > 0)
+                .map(|(w, h)| [w, h]),
+            pixel_decode_error: !d["pixel_decode_error"].is_null(),
+            original: r
+                .outputs
+                .iter()
+                .find(|o| is_original_preview(&o.rel_path))
                 .map(|o| o.rel_path.clone()),
-            maps: pngs
-                .filter(|o| o.kind != ORIGINAL_KIND)
-                .map(|o| MapView {
-                    rel_path: o.rel_path.clone(),
-                    kind: o.kind.clone(),
-                })
-                .collect(),
+            maps,
+            structure: find("structure"),
+            metadata: find("metadata"),
             digests: r
                 .outputs
                 .iter()
@@ -1002,6 +1237,27 @@ impl ViewItem {
                         .map(|(a, h)| (o.rel_path.clone(), (a.clone(), h.clone())))
                 })
                 .collect(),
+        }
+    }
+
+    /// ui key of the sentence shown in place of the original when it has no preview: why there is none.
+    pub fn original_placeholder(&self) -> &'static str {
+        if self.analysis_status == "not_an_image" {
+            "viewer_not_an_image"
+        } else if self.analysis_status == "not_completed" {
+            "analysis_not_completed"
+        } else if self.format.as_deref() == Some("heif") {
+            "no_preview_heic"
+        } else if self
+            .findings
+            .iter()
+            .any(|f| f.code == "ANALYSIS_SKIPPED_SIZE_CAP")
+        {
+            "no_preview_size_cap"
+        } else if self.pixel_decode_error {
+            "no_preview_undecodable"
+        } else {
+            "no_preview"
         }
     }
 }
@@ -1038,14 +1294,17 @@ impl Viewer {
         }
     }
 
+    /// Closing ends the viewing: opening it again is audited again.
     pub fn close(&mut self) {
         self.open = false;
+        self.last_viewed = None;
     }
 
-    /// Selects an item, its first map, and resets the view.
+    /// Selects an item, its first map, and resets the view (the mode and opacity are kept).
     pub fn select_item(&mut self, i: usize) {
         self.item = i.min(self.items.len().saturating_sub(1));
         self.map = 0;
+        self.meta_filter.clear();
         self.reset_view();
     }
 
@@ -1053,6 +1312,18 @@ impl Viewer {
     pub fn select_map(&mut self, m: usize) {
         let n = self.current_item().map_or(0, |i| i.maps.len());
         self.map = m.min(n.saturating_sub(1));
+    }
+
+    pub fn set_mode(&mut self, m: ViewMode) {
+        self.mode = m;
+    }
+
+    pub fn set_opacity(&mut self, o: f32) {
+        self.opacity = if o.is_finite() {
+            o.clamp(0.0, 1.0)
+        } else {
+            DEFAULT_OPACITY
+        };
     }
 
     pub fn reset_view(&mut self) {
@@ -1080,6 +1351,20 @@ impl Viewer {
     pub fn map_digest(&self) -> Option<(String, String)> {
         let rel = &self.current_map()?.rel_path;
         self.current_item()?.digests.get(rel).cloned()
+    }
+
+    /// The frame both sides are drawn in, in original pixels: the decoded preview's size, else the size the
+    /// analysis recorded (`details.width/height`), else the map's own size.
+    pub fn frame_size(
+        &self,
+        original: Option<[u32; 2]>,
+        map: Option<[u32; 2]>,
+    ) -> Option<[f32; 2]> {
+        let ok = |s: [u32; 2]| (s[0] > 0 && s[1] > 0).then_some([s[0] as f32, s[1] as f32]);
+        original
+            .and_then(ok)
+            .or_else(|| self.current_item().and_then(|i| i.frame).and_then(ok))
+            .or_else(|| map.and_then(ok))
     }
 
     pub fn set_zoom(&mut self, z: f32) {
@@ -1111,6 +1396,25 @@ impl Viewer {
         )
     }
 
+    /// Where a picture of the frame is drawn in a panel: (min, size), panel pixels. A map is drawn in the
+    /// same rectangle whatever its own pixel size, so it lies exactly over the original.
+    pub fn frame_rect(&self, panel: [f32; 2], frame: [f32; 2]) -> ([f32; 2], [f32; 2]) {
+        let (sc, off) = self.transform(panel, frame);
+        (off, [frame[0] * sc, frame[1] * sc])
+    }
+
+    /// Original pixel under a panel point, None outside the picture.
+    pub fn panel_to_frame(
+        &self,
+        panel: [f32; 2],
+        frame: [f32; 2],
+        p: [f32; 2],
+    ) -> Option<[f32; 2]> {
+        let (sc, off) = self.transform(panel, frame);
+        let u = [(p[0] - off[0]) / sc, (p[1] - off[1]) / sc];
+        (u[0] >= 0.0 && u[1] >= 0.0 && u[0] < frame[0] && u[1] < frame[1]).then_some(u)
+    }
+
     /// Zooms by `factor` keeping the image point under `anchor` (panel pixels) in place.
     pub fn zoom_at(&mut self, factor: f32, anchor: [f32; 2], panel: [f32; 2], img: [f32; 2]) {
         let (s0, o0) = self.transform(panel, img);
@@ -1119,6 +1423,226 @@ impl Viewer {
         let (s1, o1) = self.transform(panel, img);
         self.pan[0] += anchor[0] - (o1[0] + u[0] * s1);
         self.pan[1] += anchor[1] - (o1[1] + u[1] * s1);
+    }
+}
+
+/// Map pixels per original pixel is 1 / this: how much a map is stretched onto the original's frame
+/// (2.0 for a σ map at half resolution, 1.0 for a full-size map).
+pub fn map_scale(frame: [f32; 2], map: [u32; 2]) -> [f32; 2] {
+    if map[0] == 0 || map[1] == 0 {
+        return [1.0, 1.0];
+    }
+    [frame[0] / map[0] as f32, frame[1] / map[1] as f32]
+}
+
+/// The map pixel that covers an original pixel.
+pub fn frame_to_map(frame: [f32; 2], map: [u32; 2], p: [f32; 2]) -> [u32; 2] {
+    let s = map_scale(frame, map);
+    [
+        ((p[0] / s[0]) as u32).min(map[0].saturating_sub(1)),
+        ((p[1] / s[1]) as u32).min(map[1].saturating_sub(1)),
+    ]
+}
+
+// ---------- side panel: structure tree (structure.json) and metadata table (metadata.json) ----------
+
+/// One marker / chunk / box of `structure.json`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct StructNode {
+    pub kind: String,
+    pub offset: u64,
+    pub length: u64,
+    /// `detail` as "key=value, …".
+    pub detail: String,
+    pub children: Vec<StructNode>,
+}
+
+impl StructNode {
+    pub fn count(nodes: &[StructNode]) -> usize {
+        nodes
+            .iter()
+            .map(|n| 1 + StructNode::count(&n.children))
+            .sum()
+    }
+}
+
+/// `structure.json` → its `structure` tree.
+pub fn parse_structure(v: &Value) -> Vec<StructNode> {
+    fn node(v: &Value) -> StructNode {
+        StructNode {
+            kind: v["kind"].as_str().unwrap_or("?").to_string(),
+            offset: v["offset"].as_u64().unwrap_or(0),
+            length: v["length"].as_u64().unwrap_or(0),
+            detail: v["detail"]
+                .as_object()
+                .map(|o| {
+                    o.iter()
+                        .map(|(k, x)| {
+                            format!(
+                                "{k}={}",
+                                x.as_str()
+                                    .map(String::from)
+                                    .unwrap_or_else(|| x.to_string())
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                })
+                .unwrap_or_default(),
+            children: v["children"]
+                .as_array()
+                .map(|c| c.iter().map(node).collect())
+                .unwrap_or_default(),
+        }
+    }
+    v["structure"]
+        .as_array()
+        .map(|a| a.iter().map(node).collect())
+        .unwrap_or_default()
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MetaRow {
+    pub group: String,
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Metadata {
+    /// Every tag, then XMP (when present) as one row.
+    pub rows: Vec<MetaRow>,
+    /// XMP edit history, one line per event: "when · action · software · changed".
+    pub xmp_history: Vec<String>,
+    /// What the metadata parser could not read.
+    pub problems: Vec<String>,
+}
+
+/// `metadata.json` → table rows.
+pub fn parse_metadata(v: &Value) -> Metadata {
+    let s = |x: &Value| {
+        x.as_str().map(String::from).unwrap_or_else(|| {
+            if x.is_null() {
+                String::new()
+            } else {
+                x.to_string()
+            }
+        })
+    };
+    let mut rows: Vec<MetaRow> = v["tags"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|t| MetaRow {
+            group: s(&t["group"]),
+            name: s(&t["name"]),
+            value: s(&t["value"]),
+        })
+        .collect();
+    for (k, label) in [
+        ("makernote_present", "MakerNote"),
+        ("icc_sha256", "ICC profile SHA-256"),
+    ] {
+        match &v[k] {
+            Value::Null => {}
+            Value::Bool(false) => {}
+            x => rows.push(MetaRow {
+                group: "File".into(),
+                name: label.into(),
+                value: s(x),
+            }),
+        }
+    }
+    if let Some(x) = v["xmp"].as_str() {
+        rows.push(MetaRow {
+            group: "XMP".into(),
+            name: "XMP packet".into(),
+            value: x.to_string(),
+        });
+    }
+    let xmp_history = v["xmp_history"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|e| {
+            ["when", "action", "software_agent", "changed"]
+                .iter()
+                .map(|k| s(&e[*k]))
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join(" \u{00B7} ")
+        })
+        .collect();
+    let problems = v["problems"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(s)
+        .collect();
+    Metadata {
+        rows,
+        xmp_history,
+        problems,
+    }
+}
+
+/// Rows whose group, name or value contains the filter (case-insensitive); every row for an empty filter.
+pub fn filter_rows<'a>(rows: &'a [MetaRow], filter: &str) -> Vec<&'a MetaRow> {
+    let q = filter.trim().to_lowercase();
+    rows.iter()
+        .filter(|r| {
+            q.is_empty()
+                || r.group.to_lowercase().contains(&q)
+                || r.name.to_lowercase().contains(&q)
+                || r.value.to_lowercase().contains(&q)
+        })
+        .collect()
+}
+
+/// A JSON file of the item folder, read and checked against the audit log.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Loaded<T> {
+    pub data: Result<T, String>,
+    /// Some(true) = the file matches the digest recorded in the audit log.
+    pub digest_ok: Option<bool>,
+}
+
+/// What the side panel shows for one item (read once per item). None = the analysis wrote no such file.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SideData {
+    pub item_index: u64,
+    pub structure: Option<Loaded<Vec<StructNode>>>,
+    pub metadata: Option<Loaded<Metadata>>,
+}
+
+impl SideData {
+    pub fn load(it: &ViewItem) -> SideData {
+        fn read<T>(
+            it: &ViewItem,
+            rel: &Option<String>,
+            parse: fn(&Value) -> T,
+        ) -> Option<Loaded<T>> {
+            let rel = rel.as_ref()?;
+            let bytes = match std::fs::read(it.dir.join(rel)) {
+                Ok(b) => b,
+                Err(e) => {
+                    return Some(Loaded {
+                        data: Err(format!("{rel}: {e}")),
+                        digest_ok: None,
+                    });
+                }
+            };
+            let digest_ok = it.digests.get(rel).and_then(|d| verify_digest(&bytes, d));
+            let data = serde_json::from_slice::<Value>(&bytes)
+                .map(|v| parse(&v))
+                .map_err(|e| format!("{rel}: {e}"));
+            Some(Loaded { data, digest_ok })
+        }
+        SideData {
+            item_index: it.index,
+            structure: read(it, &it.structure, parse_structure),
+            metadata: read(it, &it.metadata, parse_metadata),
+        }
     }
 }
 
@@ -1432,12 +1956,19 @@ mod tests {
         let db = std::env::temp_dir().join(format!("rv-gui-fp-{}.json", std::process::id()));
         std::fs::write(&db, "{}").unwrap();
         s.set_option(OptionChange::FingerprintsDb(db.display().to_string()));
-        assert!(s.set_option(OptionChange::References(" nope-ref.jpg ; ".into())));
-        assert_eq!(s.references_entry, "nope-ref.jpg");
+        s.references_entry = " nope-ref.jpg ; ".into();
+        assert!(s.add_typed_references());
+        assert!(s.references_entry.is_empty());
+        assert_eq!(s.options.references, vec![PathBuf::from("nope-ref.jpg")]);
         assert!(s.to_config().unwrap_err().contains("nope-ref.jpg"));
         let r = std::env::temp_dir().join(format!("rv-gui-ref-{}.jpg", std::process::id()));
         std::fs::write(&r, b"\xFF\xD8\xFF").unwrap();
-        s.set_option(OptionChange::References(format!("\"{}\"", r.display())));
+        assert!(s.remove_reference(0));
+        assert!(!s.remove_reference(0), "nothing left to remove");
+        s.set_option(OptionChange::References(vec![PathBuf::from(format!(
+            "\"{}\"",
+            r.display()
+        ))]));
         let cfg = s.to_config().unwrap();
         assert_eq!(cfg.domain.fingerprints_db.as_deref(), Some(db.as_path()));
         assert_eq!(cfg.domain.references, vec![r.clone()]);
@@ -1452,7 +1983,7 @@ mod tests {
                 .any(|(a, _)| a == "ui_references_changed")
         );
         s.set_option(OptionChange::FingerprintsDb(String::new()));
-        s.set_option(OptionChange::References(String::new()));
+        s.set_option(OptionChange::References(vec![]));
         assert!(s.options.fingerprints_db.is_none() && s.options.references.is_empty());
         let _ = std::fs::remove_file(&db);
         let _ = std::fs::remove_file(&r);
@@ -1461,7 +1992,9 @@ mod tests {
     fn map(rel: &str) -> MapView {
         MapView {
             rel_path: rel.into(),
-            kind: "ela_map".into(),
+            kind: "map".into(),
+            family: MapFamily::from_file(rel),
+            ..Default::default()
         }
     }
 
@@ -1657,16 +2190,508 @@ mod tests {
         }
     }
 
+    // ---------- viewer model, scaling, blend, audit (synthetic results) ----------
+
+    use rv_imgauth_core::report::OutputRecord;
+
+    fn out(rel: &str, kind: &str, digest: Option<&str>) -> OutputRecord {
+        OutputRecord {
+            rel_path: rel.into(),
+            kind: kind.into(),
+            bytes: 1,
+            hashes: digest
+                .map(|d| [("sha256".to_string(), d.to_string())].into())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn item(index: u64, name: &str, details: Value, outputs: Vec<OutputRecord>) -> ItemResult {
+        ItemResult {
+            index,
+            path: PathBuf::from(name),
+            size: 1,
+            modified_utc: None,
+            hashes: vec![],
+            detected_type: None,
+            extension: None,
+            findings: vec![],
+            error: None,
+            details,
+            outputs,
+            audit_first_seq: 0,
+            audit_last_seq: 0,
+            evidence_id: None,
+            case_status: None,
+            intake_utc: None,
+        }
+    }
+
+    /// A JPEG with every map kind the analysis writes (listed out of order), a HEIC without pixels, a text file.
+    fn synthetic_results() -> Vec<ItemResult> {
+        let jpeg = item(
+            1,
+            "photo.jpg",
+            json!({"image_analysis": "completed", "format": "jpeg", "width": 1200, "height": 900,
+                "maps": [{"file": "maps/ela.png", "params": {"quality": "95", "gain": "20"}},
+                         {"file": "maps/ghost-q60.png", "params": {"quality": "60"}},
+                         {"file": "maps/copymove.png", "params": {"search_size": "1024x768"}}]}),
+            vec![
+                out("structure.json", "structure", None),
+                out("metadata.json", "metadata", None),
+                out("maps/thumbnail-diff.png", "map", None),
+                out("maps/ghost-q90.png", "map", None),
+                out("maps/ghost-q60.png", "map", None),
+                out("maps/copymove.png", "map", None),
+                out("maps/noise-sigma.png", "map", None),
+                out("maps/noise.png", "map", None),
+                out("maps/ela.png", "map", Some("e1a")),
+            ],
+        );
+        let heic = item(
+            2,
+            "iphone.heic",
+            json!({"image_analysis": "completed", "format": "heif", "width": 4032, "height": 3024, "maps": []}),
+            vec![
+                out("structure.json", "structure", None),
+                out("metadata.json", "metadata", None),
+            ],
+        );
+        let text = item(3, "notes.txt", json!({}), vec![]);
+        vec![jpeg, heic, text]
+    }
+
     #[test]
-    fn sample_run_loads_the_image_viewer() {
-        let ev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence");
-        let out = std::env::temp_dir().join(format!("rv-gui-sample-{}", std::process::id()));
+    fn viewer_lists_only_the_maps_each_item_has_in_selector_order() {
+        let v = Viewer::from_results(&synthetic_results(), Path::new("R"));
+        assert_eq!(v.items.len(), 2, "the text file is not an image");
+        let j = &v.items[0];
+        let names: Vec<&str> = j.maps.iter().map(|m| m.name()).collect();
+        assert_eq!(
+            names,
+            [
+                "ela.png",
+                "noise.png",
+                "noise-sigma.png",
+                "copymove.png",
+                "ghost-q60.png",
+                "ghost-q90.png",
+                "thumbnail-diff.png"
+            ]
+        );
+        assert_eq!(j.maps[0].params["quality"], "95");
+        assert_eq!(j.maps[4].family, MapFamily::Ghost(60));
+        assert!(j.maps[1].params.is_empty(), "no params recorded for noise");
+        assert_eq!(j.frame, Some([1200, 900]));
+        assert_eq!(j.structure.as_deref(), Some("structure.json"));
+        assert_eq!(j.dir, Path::new("R/items/00001-photo.jpg"));
+        // Absent original: the placeholder says why.
+        assert!(j.original.is_none());
+        assert_eq!(j.original_placeholder(), "no_preview");
+        let h = &v.items[1];
+        assert!(h.maps.is_empty() && h.original.is_none());
+        assert_eq!(h.original_placeholder(), "no_preview_heic");
+        assert!(
+            h.metadata.is_some(),
+            "structure and metadata are still shown"
+        );
+        let mut x = h.clone();
+        x.format = Some("png".into());
+        x.pixel_decode_error = true;
+        assert_eq!(x.original_placeholder(), "no_preview_undecodable");
+        x.findings = vec![Finding::new("ANALYSIS_SKIPPED_SIZE_CAP", Severity::Info)];
+        assert_eq!(x.original_placeholder(), "no_preview_size_cap");
+        x.analysis_status = "not_completed".into();
+        assert_eq!(x.original_placeholder(), "analysis_not_completed");
+        x.analysis_status = "not_an_image".into();
+        assert_eq!(x.original_placeholder(), "viewer_not_an_image");
+
+        // Labels in the interface language; the results table counts overlay maps only.
+        let mut s = GuiState::default();
+        let labels: Vec<String> = j.maps.iter().map(|m| s.map_label(m)).collect();
+        assert_eq!(labels[0], "Error level (ELA)");
+        assert_eq!(labels[2], "Noise level (σ)");
+        assert_eq!(labels[4], "JPEG ghost q60");
+        s.ui_lang = "fr".into();
+        assert_eq!(s.map_label(&j.maps[5]), "Fantôme JPEG q90");
+        s.ui_lang = "es".into();
+        assert_eq!(s.map_label(&j.maps[6]), "Diferencia con la miniatura");
+        assert_eq!(MapFamily::from_file("maps/whatever.png"), MapFamily::Other);
+        assert_eq!(s.map_label(&map("maps/whatever.png")), "whatever.png");
+        assert!(!is_overlay_map(ORIGINAL_PREVIEW) && is_overlay_map("maps/ela.png"));
+        assert!(!is_overlay_map("structure.json"));
+    }
+
+    #[test]
+    fn maps_are_scaled_onto_the_original_frame() {
+        let mut v = Viewer::from_results(&synthetic_results(), Path::new("R"));
+        v.open_item(0);
+        // Frame: the decoded preview's size first, then details.width/height, then the map's own size.
+        assert_eq!(
+            v.frame_size(Some([1200, 900]), Some([600, 450])),
+            Some([1200.0, 900.0])
+        );
+        assert_eq!(v.frame_size(None, Some([600, 450])), Some([1200.0, 900.0]));
+        v.items[0].frame = None;
+        assert_eq!(v.frame_size(None, Some([600, 450])), Some([600.0, 450.0]));
+        assert_eq!(v.frame_size(Some([0, 0]), None), None);
+        // σ at half resolution is stretched ×2; copy-move searched at 1024 px on a 2048 px original ×2.
+        assert_eq!(map_scale([1200.0, 900.0], [600, 450]), [2.0, 2.0]);
+        assert_eq!(map_scale([2048.0, 1536.0], [1024, 768]), [2.0, 2.0]);
+        assert_eq!(map_scale([1200.0, 900.0], [1200, 900]), [1.0, 1.0]);
+        assert_eq!(map_scale([1.0, 1.0], [0, 0]), [1.0, 1.0]);
+        assert_eq!(
+            frame_to_map([1200.0, 900.0], [600, 450], [1199.0, 3.0]),
+            [599, 1]
+        );
+        assert_eq!(
+            frame_to_map([1200.0, 900.0], [600, 450], [5000.0, 5000.0]),
+            [599, 449]
+        );
+        // Both sides use one rectangle for the frame: a 1200x900 frame in a 600x600 panel fills the width.
+        let (min, size) = v.frame_rect([600.0, 600.0], [1200.0, 900.0]);
+        assert!((size[0] - 600.0).abs() < 1e-3 && (size[1] - 450.0).abs() < 1e-3);
+        assert!((min[1] - 75.0).abs() < 1e-3);
+        // Panel point -> original pixel, inverse of the transform; outside the picture is None.
+        assert_eq!(
+            v.panel_to_frame([600.0, 600.0], [1200.0, 900.0], [300.0, 300.0]),
+            Some([600.0, 450.0])
+        );
+        assert_eq!(
+            v.panel_to_frame([600.0, 600.0], [1200.0, 900.0], [300.0, 10.0]),
+            None
+        );
+        v.zoom_at(2.0, [300.0, 300.0], [600.0, 600.0], [1200.0, 900.0]);
+        let p = v
+            .panel_to_frame([600.0, 600.0], [1200.0, 900.0], [300.0, 300.0])
+            .unwrap();
+        assert!(
+            (p[0] - 600.0).abs() < 1e-2 && (p[1] - 450.0).abs() < 1e-2,
+            "zoom keeps the point"
+        );
+    }
+
+    #[test]
+    fn blend_mode_and_opacity() {
+        let mut v = Viewer::from_results(&synthetic_results(), Path::new("R"));
+        v.open_item(0);
+        assert_eq!((v.mode, v.opacity), (ViewMode::SideBySide, DEFAULT_OPACITY));
+        v.set_mode(ViewMode::Blend);
+        v.set_opacity(0.8);
+        assert_eq!(v.opacity, 0.8);
+        v.set_opacity(7.0);
+        assert_eq!(v.opacity, 1.0);
+        v.set_opacity(-1.0);
+        assert_eq!(v.opacity, 0.0);
+        v.set_opacity(f32::NAN);
+        assert_eq!(v.opacity, DEFAULT_OPACITY);
+        v.set_opacity(0.3);
+        v.set_zoom(4.0);
+        v.meta_filter = "make".into();
+        // Another map keeps everything; another item keeps the mode and opacity but resets the view.
+        v.select_map(3);
+        assert_eq!((v.mode, v.opacity, v.zoom), (ViewMode::Blend, 0.3, 4.0));
+        v.select_item(1);
+        assert_eq!((v.mode, v.opacity, v.zoom), (ViewMode::Blend, 0.3, 1.0));
+        assert!(v.meta_filter.is_empty(), "filter belongs to the item");
+        assert_eq!(ViewMode::Blend.key(), "blend");
+        assert_eq!(ViewMode::SideBySide.key(), "side_by_side");
+    }
+
+    #[test]
+    fn viewing_a_map_is_audited_once_per_item_map_and_mode() {
+        let mut s = GuiState::default();
+        let results = synthetic_results();
+        s.viewer = Viewer::from_results(&results, Path::new("R"));
+        s.viewer.run_id = "20261028T000000Z-abcdef".into();
+        s.results = results
+            .iter()
+            .map(|r| ResultRow {
+                index: r.index,
+                name: r.file_name(),
+                status: "ok".into(),
+                findings: 0,
+                top: None,
+                maps: 0,
+                evidence_id: None,
+                viewer_item: s.viewer.item_for_index(r.index),
+            })
+            .collect();
+        assert!(s.map_view_event().is_none(), "viewer closed");
+        s.open_viewer(0);
+        let viewed: Vec<&Value> = s
+            .ui_actions
+            .iter()
+            .filter(|(a, _)| a == "ui_map_viewed")
+            .map(|(_, d)| d)
+            .collect();
+        assert_eq!(viewed.len(), 1, "opening shows the first map");
+        let d = viewed[0];
+        assert_eq!(d["item"], "photo.jpg");
+        assert_eq!(d["index"], 1);
+        assert_eq!(d["map"], "maps/ela.png");
+        assert_eq!(d["map_kind"], "ela");
+        assert_eq!(d["mode"], "side_by_side");
+        assert!(d["opacity"].is_null());
+        assert_eq!(d["original_shown"], false);
+        assert_eq!(
+            d["map_digest"],
+            json!({"algorithm": "sha256", "value": "e1a"})
+        );
+        assert_eq!(d["run_id"], "20261028T000000Z-abcdef");
+        assert!(d["at_utc"].is_string());
+        let count = |s: &GuiState| {
+            s.ui_actions
+                .iter()
+                .filter(|(a, _)| a == "ui_map_viewed")
+                .count()
+        };
+        // Redrawing, zooming or panning the same view is not a new entry.
+        assert!(!s.audit_map_view());
+        s.viewer.set_zoom(3.0);
+        assert!(!s.audit_map_view());
+        // Another map, another mode: new entries; opacity alone is not.
+        s.viewer.select_map(4);
+        assert!(s.audit_map_view());
+        s.viewer.set_mode(ViewMode::Blend);
+        s.viewer.set_opacity(0.25);
+        assert!(s.audit_map_view());
+        let last = &s.ui_actions.last().unwrap().1;
+        assert_eq!(
+            (last["map"].as_str(), last["map_kind"].as_str()),
+            (Some("maps/ghost-q60.png"), Some("ghost_q60"))
+        );
+        assert_eq!(
+            (last["mode"].as_str(), last["opacity"].as_f64()),
+            (Some("blend"), Some(0.25))
+        );
+        assert!(last["map_digest"].is_null());
+        s.viewer.set_opacity(0.9);
+        assert!(!s.audit_map_view());
+        assert_eq!(count(&s), 3);
+        // An item without maps shows nothing to audit; closing and reopening is a new viewing.
+        s.viewer.select_item(1);
+        assert!(!s.audit_map_view());
+        s.viewer.close();
+        s.open_viewer(0);
+        assert_eq!(count(&s), 4);
+        // The hook hands the entries to the next run's audit log (preamble), before ui_start_clicked.
+        s.add_input(PathBuf::from("."));
+        let cfg = s.to_config().unwrap();
+        let actions: Vec<&str> = cfg.preamble.iter().map(|(a, _)| a.as_str()).collect();
+        assert_eq!(actions.iter().filter(|a| **a == "ui_map_viewed").count(), 4);
+        assert_eq!(*actions.last().unwrap(), "ui_start_clicked");
+    }
+
+    #[test]
+    fn every_analysis_option_reaches_the_run_config() {
+        let dir = std::env::temp_dir().join(format!("rv-gui-opts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (r1, r2, db) = (
+            dir.join("ref 1.jpg"),
+            dir.join("ref-2.jpg"),
+            dir.join("fp.json"),
+        );
+        for p in [&r1, &r2, &db] {
+            std::fs::write(p, b"x").unwrap();
+        }
+        let mut s = GuiState::default();
+        s.add_input(dir.clone());
+        s.set_option(OptionChange::Maps(vec!["ghosts".into(), "ela".into()]));
+        s.set_option(OptionChange::CopyMove(false));
+        s.set_option(OptionChange::ElaQuality(90));
+        s.set_option(OptionChange::MaxPixels(25_000_000));
+        s.set_option(OptionChange::ItemReportsFlaggedOnly(true));
+        s.set_option(OptionChange::FingerprintsDb(db.display().to_string()));
+        s.set_option(OptionChange::WorkerTimeout(300));
+        s.set_option(OptionChange::WorkerMemory(4096));
+        // Picker: several files at once, then a typed one, a duplicate ignored, one removed.
+        assert!(s.add_references([r1.clone(), r2.clone()]));
+        s.references_entry = format!("\"{}\"", r1.display());
+        assert!(!s.add_typed_references(), "already listed");
+        s.references_entry = format!("{};{}", r2.display(), dir.join("extra.jpg").display());
+        assert!(s.add_typed_references());
+        assert_eq!(s.options.references.len(), 3);
+        assert!(
+            s.to_config().unwrap_err().contains("extra.jpg"),
+            "missing reference refused"
+        );
+        assert!(s.remove_reference(2));
+        let cfg = s.to_config().unwrap();
+        let d = &cfg.domain;
+        assert_eq!(d.maps, ["ela", "ghosts"]);
+        assert!(!d.copy_move && d.item_reports_flagged_only);
+        assert_eq!((d.ela_quality, d.max_pixels), (90, 25_000_000));
+        assert_eq!((d.worker_timeout_s, d.worker_memory_mb), (300, 4096));
+        assert_eq!(d.references, vec![r1.clone(), r2.clone()]);
+        assert_eq!(d.fingerprints_db.as_deref(), Some(db.as_path()));
+        assert!(matches!(d.isolation, Isolation::Subprocess { .. }));
+        let opts = &cfg.preamble.last().unwrap().1["options"];
+        assert_eq!(opts["maps"], json!(["ela", "ghosts"]));
+        assert_eq!(opts["references"].as_array().unwrap().len(), 2);
+        let changed: Vec<&Value> = s
+            .ui_actions
+            .iter()
+            .filter(|(a, _)| a == "ui_references_changed")
+            .map(|(_, d)| &d["value"])
+            .collect();
+        assert_eq!(changed.len(), 3, "add, add typed, remove");
+        assert_eq!(
+            changed[2],
+            &json!([r1.display().to_string(), r2.display().to_string()])
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn structure_tree_and_metadata_table() {
+        let st = parse_structure(&json!({"structure": [
+            {"kind": "ftyp", "offset": 0, "length": 32, "detail": {"brand": "heic"}, "children": []},
+            {"kind": "meta", "offset": 32, "length": 400, "detail": {}, "children": [
+                {"kind": "meta/iinf/infe", "offset": 233, "length": 21, "detail": {"id": "1", "type": "grid"},
+                 "children": []}]}]}));
+        assert_eq!(st.len(), 2);
+        assert_eq!(
+            (st[0].kind.as_str(), st[0].offset, st[0].length),
+            ("ftyp", 0, 32)
+        );
+        assert_eq!(st[0].detail, "brand=heic");
+        assert_eq!(st[1].children[0].detail, "id=1, type=grid");
+        assert_eq!(StructNode::count(&st), 3);
+        assert!(parse_structure(&json!({})).is_empty());
+
+        let m = parse_metadata(&json!({
+            "tags": [{"group": "IFD0", "id": 271, "name": "Make", "value": "Canon"},
+                     {"group": "IFD0", "id": 305, "name": "Software", "value": "GIMP 2.10"},
+                     {"group": "Exif", "id": 36867, "name": "DateTimeOriginal", "value": "2026:05:14 10:21:33"}],
+            "makernote_present": true, "icc_sha256": null, "xmp": "<x:xmpmeta/>",
+            "xmp_history": [{"action": "saved", "software_agent": "Gimp 2.10", "when": "2026-05-16T17:40:02+02:00",
+                             "changed": "/"}],
+            "problems": ["IFD1 truncated"]}));
+        assert_eq!(m.rows.len(), 5, "3 tags + MakerNote + XMP packet");
+        assert_eq!(
+            m.xmp_history,
+            ["2026-05-16T17:40:02+02:00 \u{00B7} saved \u{00B7} Gimp 2.10 \u{00B7} /"]
+        );
+        assert_eq!(m.problems, ["IFD1 truncated"]);
+        let names = |q: &str| -> Vec<String> {
+            filter_rows(&m.rows, q)
+                .iter()
+                .map(|r| r.name.clone())
+                .collect()
+        };
+        assert_eq!(names("gimp"), ["Software"]);
+        assert_eq!(names(" EXIF "), ["DateTimeOriginal"]);
+        assert_eq!(names("ifd0"), ["Make", "Software"]);
+        assert_eq!(names("").len(), 5);
+        assert!(names("nothing-like-this").is_empty());
+    }
+
+    /// Fixture item folder with `maps/original.png` (the lossless preview of the decoded original), a
+    /// full-size ELA map and downscaled copy-move and σ maps (`tests/fixtures/report/items/00003-…`).
+    #[test]
+    fn fixture_with_original_preview_loads_both_sides_and_side_panel() {
+        let report = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/report");
+        let dir = report.join("items/00003-with-original.jpg");
+        let sha =
+            |rel: &str| hash::hash_bytes(&std::fs::read(dir.join(rel)).unwrap(), HashAlgo::Sha256);
+        let r = item(
+            3,
+            "with-original.jpg",
+            json!({"image_analysis": "completed", "format": "jpeg", "width": 8, "height": 6,
+                   "maps": [{"file": "maps/copymove.png", "params": {"search_size": "4x3", "block": "16"}}]}),
+            // The preview's kind is not relied on: it is recognised by its path.
+            [
+                "maps/copymove.png",
+                "maps/original.png",
+                "maps/noise-sigma.png",
+                "maps/ela.png",
+                "structure.json",
+                "metadata.json",
+            ]
+            .iter()
+            .map(|rel| {
+                let kind = match *rel {
+                    "structure.json" => "structure",
+                    "metadata.json" => "metadata",
+                    "maps/original.png" => "original",
+                    _ => "map",
+                };
+                out(rel, kind, Some(&sha(rel)))
+            })
+            .collect(),
+        );
+        let mut s = GuiState {
+            viewer: Viewer::from_results(std::slice::from_ref(&r), &report),
+            ..Default::default()
+        };
+        s.viewer.open_item(0);
+        let it = s.viewer.current_item().unwrap().clone();
+        assert_eq!(it.original.as_deref(), Some(ORIGINAL_PREVIEW));
+        let names: Vec<&str> = it.maps.iter().map(|m| m.name()).collect();
+        assert_eq!(
+            names,
+            ["ela.png", "noise-sigma.png", "copymove.png"],
+            "original is not an overlay"
+        );
+        // Both sides decode, match their audited digests, and share the original's frame.
+        let decode = |p: PathBuf, d: Option<(String, String)>| {
+            let bytes = std::fs::read(p).unwrap();
+            assert_eq!(verify_digest(&bytes, &d.unwrap()), Some(true));
+            let (w, h, _) = decode_png(&bytes).unwrap();
+            [w, h]
+        };
+        let orig = decode(
+            s.viewer.original_path().unwrap(),
+            s.viewer.original_digest(),
+        );
+        assert_eq!(orig, [8, 6]);
+        s.viewer.select_map(2);
+        let cm = decode(s.viewer.map_path().unwrap(), s.viewer.map_digest());
+        assert_eq!(cm, [4, 3]);
+        let frame = s.viewer.frame_size(Some(orig), Some(cm)).unwrap();
+        assert_eq!(map_scale(frame, cm), [2.0, 2.0]);
+        assert_eq!(s.map_params_lines(), ["block: 16", "search_size: 4x3"]);
+        s.audit_map_view();
+        assert_eq!(s.ui_actions.last().unwrap().1["original_shown"], true);
+        // Side panel: structure tree and metadata table from the item's files, digests checked.
+        let side = SideData::load(&it);
+        let st = side.structure.unwrap();
+        assert_eq!(st.digest_ok, Some(true));
+        let st = st.data.unwrap();
+        assert_eq!(st[0].kind, "SOI");
+        assert_eq!(st[4].children[0].kind, "ECS");
+        let md = side.metadata.unwrap();
+        assert_eq!(md.digest_ok, Some(true));
+        let md = md.data.unwrap();
+        assert!(
+            filter_rows(&md.rows, "gimp")
+                .iter()
+                .any(|r| r.name == "Software")
+        );
+        assert_eq!(md.xmp_history.len(), 2);
+        // A file listed but missing on disk is reported, not a panic.
+        let mut gone = it.clone();
+        gone.structure = Some("missing.json".into());
+        assert!(SideData::load(&gone).structure.unwrap().data.is_err());
+    }
+
+    // ---------- real runs over examples/sample/evidence ----------
+
+    fn sample_run(
+        inputs: Vec<PathBuf>,
+        tag: &str,
+        set: impl FnOnce(&mut GuiState),
+    ) -> (GuiState, RunSummary, PathBuf) {
+        let out = std::env::temp_dir().join(format!("rv-gui-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&out);
         let mut s = GuiState {
             timestamp: false, // tests stay offline
             ..Default::default()
         };
-        s.add_input(ev);
+        for i in inputs {
+            s.add_input(i);
+        }
+        set(&mut s);
         s.out_dir = out.display().to_string();
         let mut cfg = s.to_config().unwrap();
         // The test binary is not the GUI exe (no `worker` entry point): analyse in process here.
@@ -1676,35 +2701,201 @@ mod tests {
         let summary = rv_imgauth_core::run(&cfg, &mut |e| s.apply(e), &cancel).unwrap();
         assert_eq!(s.phase, Phase::Finished);
         s.load_results(&summary);
-        assert_eq!(s.results.len(), summary.results.len());
-        assert_eq!(s.results.len(), 3);
+        (s, summary, out)
+    }
+
+    fn evidence() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence")
+    }
+
+    fn files_under(p: &Path) -> usize {
+        std::fs::read_dir(p)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                if e.path().is_dir() {
+                    files_under(&e.path())
+                } else {
+                    1
+                }
+            })
+            .sum()
+    }
+
+    #[test]
+    fn sample_run_loads_the_image_viewer() {
+        let ev = evidence();
+        let (mut s, summary, out) = sample_run(vec![ev.clone()], "sample", |s| {
+            s.add_references([
+                ev.join("reference/ref-1.jpg"),
+                ev.join("reference/ref-2.jpg"),
+            ]);
+        });
+        // Every file of the folder, reference/ included (recursive by default), is one row and one image.
+        assert_eq!(s.results.len(), files_under(&ev));
+        assert!(s.results.len() >= 14);
+        assert!(
+            s.results.iter().all(|r| r.viewer_item.is_some()),
+            "all are examined as images"
+        );
+        assert_eq!(s.viewer.items.len(), s.results.len());
+        assert_eq!(s.viewer.run_id, summary.run_id);
+        for (row, it) in s.results.iter().zip(&s.viewer.items) {
+            // The selector lists exactly the overlay maps written on disk, in selector order.
+            let mut on_disk: Vec<String> = std::fs::read_dir(it.dir.join("maps"))
+                .map(|d| {
+                    d.flatten()
+                        .map(|e| format!("maps/{}", e.file_name().to_string_lossy()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            on_disk.retain(|p| is_overlay_map(p));
+            on_disk.sort();
+            let mut listed: Vec<String> = it.maps.iter().map(|m| m.rel_path.clone()).collect();
+            assert!(
+                it.maps.windows(2).all(|w| w[0].family <= w[1].family),
+                "{}",
+                it.name
+            );
+            listed.sort();
+            assert_eq!(listed, on_disk, "{}", it.name);
+            assert_eq!(row.maps, it.maps.len());
+            // Structure and metadata are there for every parsed image, read and matching their digests.
+            if it.analysis_status == "completed" {
+                let side = SideData::load(it);
+                assert_eq!(
+                    side.structure.as_ref().map(|l| l.digest_ok),
+                    Some(Some(true)),
+                    "{}",
+                    it.name
+                );
+                assert!(
+                    !side.structure.unwrap().data.unwrap().is_empty(),
+                    "{}",
+                    it.name
+                );
+                assert!(side.metadata.unwrap().data.is_ok(), "{}", it.name);
+            }
+            // Original: when the preview exists it decodes at the analysed size; otherwise the placeholder
+            // says why (HEIC, undecodable...).
+            match &it.original {
+                Some(rel) => {
+                    let (w, h, _) = decode_png(&std::fs::read(it.dir.join(rel)).unwrap()).unwrap();
+                    assert_eq!(Some([w, h]), it.frame, "{}", it.name);
+                }
+                None => assert!(!s.tr(it.original_placeholder()).is_empty()),
+            }
+        }
+        let by_name = |n: &str| s.viewer.items.iter().find(|i| i.name == n).unwrap();
+        let cam = by_name("camera-original.jpg");
+        let fams: Vec<MapFamily> = cam.maps.iter().map(|m| m.family).collect();
+        assert_eq!(
+            fams,
+            [
+                MapFamily::Ela,
+                MapFamily::Noise,
+                MapFamily::NoiseSigma,
+                MapFamily::ThumbnailDiff
+            ]
+        );
+        assert_eq!(
+            cam.maps[0].params["quality"], "95",
+            "recorded ELA parameters"
+        );
+        assert!(
+            by_name("pix-copy-move.jpg")
+                .maps
+                .iter()
+                .any(|m| m.family == MapFamily::CopyMove)
+        );
+        let heic = by_name("iphone-like.heic");
+        assert!(heic.maps.is_empty() && heic.original.is_none());
+        assert_eq!(heic.original_placeholder(), "no_preview_heic");
+        let side = SideData::load(heic);
+        let tree = side.structure.unwrap().data.unwrap();
+        assert!(
+            tree.iter().any(|n| !n.children.is_empty()),
+            "HEIC boxes are nested"
+        );
+        // σ maps are smaller than the frame: stretched ×2.
+        let sigma = cam
+            .maps
+            .iter()
+            .find(|m| m.family == MapFamily::NoiseSigma)
+            .unwrap();
+        let (w, h, _) = decode_png(&std::fs::read(cam.dir.join(&sigma.rel_path)).unwrap()).unwrap();
+        assert_eq!(map_scale([1200.0, 900.0], [w, h]), [2.0, 2.0]);
+        // Metadata filter on a real file.
+        let md = SideData::load(cam).metadata.unwrap().data.unwrap();
+        let canon: Vec<&str> = filter_rows(&md.rows, "canon")
+            .iter()
+            .map(|r| r.name.as_str())
+            .collect();
+        assert!(canon.contains(&"Make") && canon.contains(&"Model"));
+
+        // Opening a row shows its first map, audited with the run id; findings worded, most severe first.
         let row = s
             .results
             .iter()
-            .position(|r| r.name == "foto-vacaciones.jpg")
+            .position(|r| r.name == "camera-original.jpg")
             .unwrap();
-        assert!(s.results[row].viewer_item.is_some());
-        assert!(
-            s.results
-                .iter()
-                .filter(|r| r.name.ends_with(".txt"))
-                .all(|r| r.viewer_item.is_none())
-        );
         s.open_viewer(row);
-        let v = &s.viewer;
-        assert!(v.open);
-        let it = v.current_item().unwrap();
-        assert_eq!(it.name, "foto-vacaciones.jpg");
-        assert_eq!(it.analysis_status, "not_implemented");
-        // Planned analyses: no maps yet, so both sides show their placeholder.
-        assert!(it.maps.is_empty() && v.map_path().is_none() && v.original_path().is_none());
+        let (a, d) = s.ui_actions.last().unwrap();
+        assert_eq!(a, "ui_map_viewed");
+        assert_eq!(
+            (d["item"].as_str(), d["map"].as_str()),
+            (Some("camera-original.jpg"), Some("maps/ela.png"))
+        );
+        assert_eq!(d["run_id"].as_str(), Some(summary.run_id.as_str()));
+        assert_eq!(d["map_digest"]["algorithm"], "sha256");
         let f = s.viewer_findings();
         assert!(!f.is_empty() && f.windows(2).all(|w| w[0].severity >= w[1].severity));
-        assert!(f.iter().any(|x| x.code == "ANALYSIS_NOT_IMPLEMENTED"));
+        assert!(f.iter().any(|x| x.code == "ELA_MAP_WRITTEN"));
         assert!(
             f.iter()
-                .all(|x| !x.shows.is_empty() && !x.not_proves.is_empty())
+                .all(|x| !x.title.is_empty() && !x.shows.is_empty() && !x.not_proves.is_empty())
         );
+        s.ui_lang = "es".into();
+        assert!(
+            s.viewer_findings()
+                .iter()
+                .any(|x| x.title != f.iter().find(|y| y.code == x.code).unwrap().title)
+        );
+        let _ = std::fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn ghost_maps_are_listed_by_quality() {
+        let (s, _, out) = sample_run(
+            vec![evidence().join("pix-spliced-ghost.jpg")],
+            "ghosts",
+            |s| {
+                s.set_option(OptionChange::Maps(vec!["ghosts".into()]));
+                s.set_option(OptionChange::CopyMove(false));
+            },
+        );
+        let it = &s.viewer.items[0];
+        let q: Vec<u8> = it
+            .maps
+            .iter()
+            .filter_map(|m| match m.family {
+                MapFamily::Ghost(q) => Some(q),
+                _ => None,
+            })
+            .collect();
+        assert!(!q.is_empty() && q.windows(2).all(|w| w[0] < w[1]), "{q:?}");
+        assert!(
+            it.maps
+                .iter()
+                .all(|m| !matches!(m.family, MapFamily::Ela | MapFamily::Noise))
+        );
+        let g = it
+            .maps
+            .iter()
+            .find(|m| matches!(m.family, MapFamily::Ghost(_)))
+            .unwrap();
+        assert!(g.params.contains_key("quality"));
+        assert!(s.map_label(g).starts_with("JPEG ghost q"));
         let _ = std::fs::remove_dir_all(&out);
     }
 }

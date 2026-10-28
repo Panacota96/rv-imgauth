@@ -1,0 +1,71 @@
+{
+  "format": "jpeg",
+  "heif": null,
+  "height": 6,
+  "jpeg": null,
+  "png": null,
+  "structure": [
+    {
+      "children": [],
+      "detail": {},
+      "kind": "SOI",
+      "length": 2,
+      "offset": 0
+    },
+    {
+      "children": [],
+      "detail": {},
+      "kind": "APP1/Exif",
+      "length": 120,
+      "offset": 2
+    },
+    {
+      "children": [],
+      "detail": {
+        "tables_so_far": "0"
+      },
+      "kind": "DQT",
+      "length": 69,
+      "offset": 122
+    },
+    {
+      "children": [],
+      "detail": {
+        "components": "3",
+        "height": "6",
+        "width": "8"
+      },
+      "kind": "SOF0",
+      "length": 19,
+      "offset": 191
+    },
+    {
+      "children": [
+        {
+          "children": [],
+          "detail": {
+            "rst_markers": "0"
+          },
+          "kind": "ECS",
+          "length": 300,
+          "offset": 224
+        }
+      ],
+      "detail": {
+        "components": "3"
+      },
+      "kind": "SOS",
+      "length": 14,
+      "offset": 210
+    },
+    {
+      "children": [],
+      "detail": {},
+      "kind": "EOI",
+      "length": 2,
+      "offset": 524
+    }
+  ],
+  "webp": null,
+  "width": 8
+}

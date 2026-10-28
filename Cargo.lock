@@ -3531,6 +3531,7 @@ dependencies = [
  "png",
  "rfd",
  "rv-imgauth-core",
+ "rv-imgauth-img",
  "serde_json",
  "winresource",
 ]
