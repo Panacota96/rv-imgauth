@@ -1,0 +1,11 @@
+{
+  "file": "crash.jpg",
+  "format": "jpeg",
+  "width": 0,
+  "height": 0,
+  "signals": [
+    "METADATA_PROBLEMS"
+  ],
+  "coefficients": "error",
+  "thumbnail": false
+}

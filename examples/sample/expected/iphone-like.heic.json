@@ -1,0 +1,12 @@
+{
+  "file": "iphone-like.heic",
+  "format": "heif",
+  "width": 1024,
+  "height": 768,
+  "signals": [
+    "HEIF_STRUCTURE_ANOMALY",
+    "HEIF_UNREFERENCED_DATA"
+  ],
+  "coefficients": "unsupported",
+  "thumbnail": false
+}
