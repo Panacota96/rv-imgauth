@@ -24,10 +24,10 @@ fn bin() -> Command {
 }
 
 fn sample() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory")
 }
 
-/// A working copy of examples/sample/evidence (the tests modify it).
+/// A working copy of tests/fixtures/inventory (the tests modify it).
 fn evidence_copy(dir: &Path) -> PathBuf {
     let ev = dir.join("evidence-copy");
     std::fs::create_dir_all(&ev).unwrap();

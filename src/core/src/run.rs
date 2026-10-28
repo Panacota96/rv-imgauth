@@ -1121,7 +1121,7 @@ mod tests {
     }
 
     fn sample_copy(dir: &Path) -> PathBuf {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory");
         let ev = dir.join("evidence");
         std::fs::create_dir_all(&ev).unwrap();
         // The three sample items, 1..3 in name order: acta-copia.txt, acta.txt, foto-vacaciones.jpg.

@@ -46,7 +46,7 @@ fn test_pki(dir: &Path) -> Option<(std::process::Child, String)> {
 }
 
 fn sample() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory")
 }
 
 fn only_dir(p: &Path) -> PathBuf {

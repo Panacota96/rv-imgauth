@@ -88,9 +88,14 @@ fn learn_one(path: &Path) -> Result<Learned, String> {
     }
     let mut traits = BTreeMap::new();
     if let Some(j) = &img.jpeg {
-        if let Some(fp) = rv_imgauth_img::analysis::qt::fingerprint(j) {
-            traits.insert("qt_sha256".to_string(), fp.sha256);
-        }
+        // A JPEG without quantization tables (truncated, damaged) has nothing that identifies its writer.
+        let fp = rv_imgauth_img::analysis::qt::fingerprint(j).ok_or_else(|| {
+            format!(
+                "{}: cannot learn from it: no quantization tables (damaged or truncated JPEG)",
+                path.display()
+            )
+        })?;
+        traits.insert("qt_sha256".to_string(), fp.sha256);
         traits.insert("subsampling".to_string(), j.subsampling.clone());
     }
     let learned = Learned {
