@@ -62,6 +62,7 @@ jobs:
 
   test:
     needs: lint
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -89,8 +90,9 @@ jobs:
         run: |
           set -o pipefail
           # Failures are also surfaced as annotations (readable through the API without downloading logs).
-          if ! cargo test --workspace --locked 2>&1 | tee test.log; then
-            grep -E "panicked at|^---- |FAILED|^failures:|assertion|Error:|error:" test.log | head -40 | while IFS= read -r l; do echo "::error title=cargo test::${l}"; done
+          # A hard limit: a hung test must fail the job (and say which test) instead of holding the runner for hours.
+          if ! timeout 40m cargo test --workspace --locked 2>&1 | tee test.log; then
+            grep -E "panicked at|^---- |FAILED|^failures:|assertion|Error:|error:|running for over|^     Running" test.log | tail -40 | while IFS= read -r l; do echo "::error title=cargo test::${l}"; done
             exit 1
           fi
       - name: Self-test of the hash implementations
