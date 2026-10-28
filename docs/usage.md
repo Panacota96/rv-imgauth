@@ -1,321 +1,219 @@
 # Usage guide: from intake to a verified report
 
-This is the end-to-end guide for an examiner. It walks through one case, explains every output, says how to
-interpret each finding, and how to prove afterwards that nothing changed. Option lists are not repeated here:
-
-- every command, option, default, example and exit code: [usage-cli.md](usage-cli.md) (generated from `--help`);
-- the desktop app, window by window: [usage-gui.md](usage-gui.md);
-- why each check works: [theory.md](theory.md); legal weight: [admissibility.md](admissibility.md);
-- installing and verifying the tool: [installation.md](installation.md).
+This guide follows one case end to end: intake of the evidence, analysis of the images, looking at the maps,
+reading the findings, and verifying the run. Every option of every command is in
+[usage-cli.md](usage-cli.md) (generated from `--help`); the desktop app is in [usage-gui.md](usage-gui.md); why each
+analysis works is in [theory.md](theory.md).
 
 ```mermaid
 flowchart LR
-    P["0 · Prepare<br/>verified copy, self-test"] --> I["1 · Intake<br/>rv-hashinv → case folder"]
-    I --> A["2 · Analyse<br/>rv-imgauth analyze (CLI/GUI)"]
-    A --> R["3 · Review<br/>reports, revision viewer"]
-    R --> T["4 · Timestamp<br/>(automatic or later)"]
-    T --> S["5 · Report<br/>signed PDFs"]
-    S --> V["6 · Verify the run<br/>verify-log, OpenSSL, digests"]
-    V --> D[["Case file / disclosure"]]
+    A["1 · Intake<br/>rv-hashinv → case folder"] --> B["2 · Analyse<br/>rv-imgauth analyze"]
+    B --> C["3 · Look<br/>image viewer<br/>(review.jsonl)"]
+    C --> D["4 · Interpret<br/>findings + maps"]
+    D --> E["5 · Verify<br/>verify-log, verify-case"]
+    E --> F["6 · Report<br/>signed PDF + log folder"]
 ```
+
+## Contents
+
+- [1. Before you start](#1-before-you-start)
+- [2. Case walkthrough](#2-case-walkthrough)
+- [3. Analysis options](#3-analysis-options)
+- [4. Reading the outputs](#4-reading-the-outputs)
+- [5. Interpreting each finding](#5-interpreting-each-finding)
+- [6. Timestamps](#6-timestamps)
+- [7. Signing reports](#7-signing-reports)
+- [8. Verifying a run](#8-verifying-a-run)
+- [9. Fingerprint database](#9-fingerprint-database)
+- [10. Reference images](#10-reference-images)
+- [11. Troubleshooting and exit codes](#11-troubleshooting-and-exit-codes)
 
 ## 1. Before you start
 
-| Check | Why | How |
-| --- | --- | --- |
-| Work on a **verified copy** (forensic image, write-blocked export), never the original media | The tool is read-only in software, not a write blocker; it also reads each PDF twice ([theory.md B2](theory.md#b2-pipeline-and-reads-of-the-evidence)) | Imaging tool + write blocker; note model and serial |
-| The installed tool is the genuine release | Court question: "how do you know what you ran?" | [installation.md](installation.md) steps 2–4, 6, 7 |
-| Hash policy | MD5/SHA-1 alone are not collision-resistant | Always include `sha256` (or `sha512`): `--hash sha256,md5` when an older record uses MD5 |
-| Clock | Audit times come from the workstation clock | Check Windows time sync before the run |
-| Jurisdiction | Selects the custody form | `--jurisdiction co` (default) or `fr` |
-| Timestamp | Online TSA by default | `--no-timestamp` offline, then `rv-imgauth timestamp` later; `--tsa-url` for a qualified / ECD TSA |
-| Examiner certificate | Signs every PDF report | `--sign-cert examiner.p12` ([signing](#7-signing-reports-with-the-examiner-certificate)) |
+- Work on a **verified copy** (forensic image, write-blocked export or chat export), never on original media.
+- Analyse the **native file** you were given (the `.jpg`/`.heic` from the phone or the export), not a screenshot
+  of it or a copy re-saved by a viewer: every re-save destroys traces and adds double compression.
+- Select **sha256** (or sha512) as one of the hash algorithms.
+- Check the installed tool once per release ([installation.md](installation.md#7-first-run-self-test-and-sample)).
+- Synchronise the workstation clock and note the source.
 
 ## 2. Case walkthrough
 
-The example case: `CASE-2026-014`, Colombian jurisdiction, examiner Ana Ruiz, a client export on `E:\export`
-containing invoices and contracts.
-
 ### 2.1 Intake with rv-hashinv into a case folder
 
-In a real engagement the Rakvor tools share **one case folder**: the intake tool `rv-hashinv` registers each item
-once (evidence id, size, hashes); every later tool re-verifies each file against that registry before analysing
-it and links its own audit chain to the case log. Layout (`rakvor.case/1`):
+```powershell
+# 1. Intake and analysis in one step: rv-hashinv registers E0001…, then rv-imgauth analyses every image
+rv-imgauth analyze -i D:\export\photos -r --case-dir E:\CASE-014 --case CASE-014 --jurisdiction co --intake hashinv
 
-```text
-D:\cases\CASE-2026-014\
-  case.json                 case id, jurisdiction, created (written once, never changed)
-  case-log.jsonl            hash-chained case log (same algorithm as audit.jsonl)
-  evidence\registry.json    E0001…: path, size, hashes, who registered it (written only by the intake tool)
-  evidence\registry.csv     the same, flat
-  runs\rv-hashinv\<RUN-ID>\logs\ and reports\
-  runs\rv-imgauth\<RUN-ID>\logs\ and reports\
+# …or in two steps
+rv-hashinv scan -i D:\export\photos -r --case-dir E:\CASE-014 --case CASE-014 --jurisdiction co
+rv-imgauth analyze --case-dir E:\CASE-014                       # every registered item
+rv-imgauth analyze --case-dir E:\CASE-014 --evidence E0003,E0007 # only some
+
+# 2. Whole-case check before handing over
+rv-imgauth verify-case E:\CASE-014
 ```
 
-```mermaid
-flowchart LR
-    E[("E:\export<br/>read-only copy")] --> H["rv-hashinv scan<br/>--case-dir CASE"]
-    H --> R[["evidence/registry.json<br/>E0001…"]]
-    H --> L[["case-log.jsonl"]]
-    R --> P["rv-imgauth analyze<br/>--case-dir CASE"]
-    P -->|"re-hash, compare"| R
-    P --> L
-    P --> O["runs/rv-imgauth/RUN-ID/"]
-```
+Every image is re-hashed and compared with the registry **before** it is analysed: a different hash is the high
+finding `EVIDENCE_HASH_MISMATCH_WITH_CASE` (the analysis still runs), a file not registered is
+`EVIDENCE_NOT_IN_CASE_REGISTRY` (medium). Details: [case-folder.md](case-folder.md).
 
-The intake side is rv-hashinv (`rv-hashinv scan --help`); rv-imgauth is the **analysis** tool: it reads the
-registry and never writes it. Full reference: [case-folder.md](case-folder.md).
+### 2.2 Standalone runs
 
 ```powershell
-# 1. Intake: creates case.json, the registry and the case log
-rv-hashinv scan --case-dir D:\cases\CASE-2026-014 --case CASE-2026-014 --jurisdiction co `
-    -i E:\export -r --hash sha256,md5 --actor "Ana Ruiz"
+# One photo, default analyses (ELA, noise, copy-move, thumbnail), English reports
+rv-imgauth analyze -i evidence\IMG_0042.jpg
 
-# 2. Analysis of every registered item (no --input needed) ...
-rv-imgauth analyze --case-dir D:\cases\CASE-2026-014 --actor "Ana Ruiz" --sign-cert C:\certs\ana-ruiz.p12
-#    ... or only some registered items
-rv-imgauth analyze --case-dir D:\cases\CASE-2026-014 --evidence E0001,E0007 --actor "Ana Ruiz"
+# A folder with every map including JPEG ghosts, SHA-256 + MD5, Spanish reports
+rv-imgauth analyze -i D:\evidence -r --maps ela,noise,ghosts --hash sha256,md5 --lang es --case CASE-2026-014
 
-# 3. Whole-case check: case log, registry digest, each run's chain and its head recorded in the case log
-rv-imgauth verify-case D:\cases\CASE-2026-014
+# Compare with known originals from the claimed phone
+rv-imgauth analyze -i IMG_0042.jpg --reference ref\IMG_0040.jpg --reference ref\IMG_0041.jpg
+
+# Large batch: noise only, no copy-move, reports only for flagged items
+rv-imgauth analyze -i E:\phone-export -r --maps noise --copy-move off --item-reports flagged
 ```
 
-What `analyze --case-dir` does:
+Which files are examined as images: any file whose content starts with a JPEG, PNG, WebP or HEIF (`ftyp` heic,
+heix, hevc, heim, heis, mif1, msf1) signature, or whose extension is jpg, jpeg, jpe, jfif, png, webp, heic, heif or
+hif. Other files get the inventory checks only (type by signature, extension mismatch, executable, empty).
 
-- refuses a case folder whose case log, `case.json` or registry digest does not verify (exit 3, nothing written),
-  a folder of another case (`--case` must match `case.json` or be left out; exit 2) and unknown evidence ids
-  (exit 2);
-- takes every registered item by default (or the `--evidence` ids, or the `--input` paths, matched against the
-  registry by id, else path, else content);
-- makes sure at least one selected hash algorithm is in the registry (SHA-256 is added and logged as
-  `case_algorithm_added` if needed, still at most two);
-- right after hashing each item, **before** the PDF analysis, logs `evidence_verified_against_case` or raises
-  `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high, exit 3; the analysis still runs) or `EVIDENCE_NOT_IN_CASE_REGISTRY`
-  (medium);
-- starts its audit log with `run_started`, `case_linked` (case-log head, registry SHA-256) and writes into
-  `runs\rv-imgauth\<RUN-ID>\logs\` and `reports\` (`--out` is not used);
-- shows the evidence id in every report, the intake date and the case's jurisdiction on the custody form, and a
-  "Case folder" section with the counts in the statistics report;
-- appends `run_finished` (final audit head, totals, verification counts) to the case log, also after a cancel or
-  a failure.
+### 2.3 From the desktop app
 
-The summary printed at the end has one more line, e.g.
-`case:   CASE-2026-014 (analysis) verified 41, mismatched 0, not in registry 0`. In the desktop app, fill **Case
-folder** in section 1: the output folder is derived and locked, and the results table, result panel and revision
-viewer header show each item's evidence id and registry check.
+Same engine and results: [usage-gui.md](usage-gui.md).
 
-On Windows, registry paths are compared without regard to upper/lower case (the file system is case-insensitive).
+## 3. Analysis options
 
-**One step instead of two:** add `--intake hashinv` to the `analyze` command (or tick *Register the evidence
-with RV HashInv first* in the GUI) and rv-imgauth runs rv-hashinv on the same evidence before analysing it.
-Details and rules: [case-folder.md](case-folder.md#one-step-intake-with-rv-hashinv).
-
-### 2.2 Running `analyze` from the command line
-
-```powershell
-rv-imgauth analyze -i E:\export -r --hash sha256,md5 --lang es --jurisdiction co `
-    --case CASE-2026-014 --actor "Ana Ruiz" --sign-cert C:\certs\ana-ruiz.p12 --out D:\cases\CASE-2026-014\rv-imgauth
-```
-
-Every file is reviewed (non-PDFs get the inventory checks: type by signature, extension mismatch, executable,
-empty, duplicate). Defaults for the PDF analysis (revisions extracted, visual diff at 110 DPI on up to 50 pages
-per revision pair, object dump, embedded files, worker 120 s / 2048 MiB) suit almost every case. Useful
-adjustments: `--visual-diff off --item-reports flagged` for very large batches; `--worker-timeout 600
---worker-memory 4096` for huge or damaged files; `--max-pages 500` when all pages must be compared;
-`--fingerprints-db <file>` to use a colleague's or a case-specific database. All options: [usage-cli.md](usage-cli.md).
-
-At the end the CLI prints a summary:
-
-```text
-DONE (high-severity findings)  run 20261021T103903Z-67d213
-  items: 7  bytes: 105085  errors: 0  elapsed: 4.9 s
-  findings: high 3, medium 18, low 3, info 5
-  timestamp: ok 2026-10-21T10:39:08Z
-  report: D:\cases\…\reports\20261021T103903Z-67d213\statistics.es.html
-  logs:   D:\cases\…\logs\20261021T103903Z-67d213
-```
-
-Exit code 3 means "completed, at least one high-severity finding" — a normal outcome for evidence, not an error.
-
-### 2.3 Running it from the desktop app
-
-Start **RV ImgAuth**, add the evidence (files, folders or drag and drop), tick one or two hash algorithms, adjust
-*3. Options* if needed, set language, output folder, examiner and case ID in *4. Reports*, and the timestamp,
-certificate and custody form in *5. Trust*; then **Start review**. Every setting you change before starting is
-written to the run's audit log (`ui_*` actions). The engine, outputs and findings are the same as the CLI's.
-Details: [usage-gui.md](usage-gui.md).
-
-## 3. Reading the outputs
-
-```mermaid
-flowchart TB
-    OUT["&lt;OUT&gt;/"] --> L["logs/&lt;RUN-ID&gt;/<br/>audit.jsonl · audit.log · hashes.csv<br/>environment.json · timestamp-NNNNN.tsr/.json"]
-    OUT --> R["reports/&lt;RUN-ID&gt;/<br/>statistics.json/.LANG.html/.LANG.pdf"]
-    R --> I["items/NNNNN-name/"]
-    I --> T["technical.* — examiner, opposing expert"]
-    I --> S["summary.* — client"]
-    I --> K["custody.* — custody record"]
-    I --> D["revisions/ · visual/ · objects.json · embedded/"]
-```
-
-| Output | For | What to use it for |
+| Option | Default | Effect |
 | --- | --- | --- |
-| `statistics.*` | Examiner, lawyer | Run overview: who, when, interface, algorithms, totals, findings by severity and code, PDFs with several revisions / signatures / online-editor fingerprints, duplicate groups, timestamp status, audit chain head and entry count at the time it was written |
-| `technical.*` | Examiner, opposing expert | Everything about one file: path, size, all digests, findings with *what it shows / what it does not prove*, method, audit entries `#first–#last`, limitations; for PDFs: revision history table (byte range, Info/XMP dates, producer, time since previous, objects added/changed/deleted, pages changed, signed by) and timeline, signatures, fonts (first 100 rows; all in `objects.json`), producer fingerprints with the databases used (name, version, SHA-256), visual comparison images and per-page measurements (changed pixels and share, regions, DPI, page-size change), parser warnings with byte offsets (first 100; all in `warnings.json`), extracted files with digests |
-| `summary.*` | Client | Plain-language status, the primary fingerprint, the findings in one sentence each, a short document history ("saved 3 times; last change 9 days after creation, with a PDF editor") and the next step |
-| `custody.*` | Custody record | Jurisdiction form (Spanish for `co`, French for `fr`) + English copy, pre-filled from the run, with a persons table (examiner, assistants, witnesses: name, position, ID type and number, signature) and transfer rows to fill in by hand and sign. An internal record, used **alongside** the official form ([admissibility.md](admissibility.md) G9) |
-| `revisions/rev-NN.pdf` | Examiner | Each saved version, byte-exact prefix of the evidence; open them in any viewer, re-derive them with `head -c` ([theory.md B5](theory.md#b5-revision-extraction-byte-exact-prefixes)) |
-| `visual/rev-AA-vs-BB-page-PPP.png` | Everyone | Previous and current page side by side, changed regions outlined in violet; the caption gives the changed share and region count |
-| `objects.json` | Expert | Object tree of every revision: id, file offset, type, dictionary (depth ≤ 8, ≤ 1000 entries per level, long strings hex-truncated), object stream, stream offset/length |
-| `embedded/NN-name.*` | Examiner | Attachments and images as stored (`.jpg` for DCT, else `.bin`) and `.inflated.*` when Flate-compressed |
-| `audit.jsonl` / `audit.log` | Verification | Every action, hash-chained / the same, readable |
-| `hashes.csv` | Verification | Hash register: `index,path,size,<algo1>[,<algo2>],status,error` |
-| `environment.json` | Reproducibility | Tool, compiler, every dependency version, OS, host, user, command line |
+| `--maps LIST` | `ela,noise` | Maps per image: `ela` (JPEG only, `ela.png`), `noise` (`noise.png`, `noise-sigma.png`), `ghosts` (JPEG only, `ghost-q50…q90.png`, images ≤ 24 MP), or `none`. `maps/original.png` and `thumbnail-diff.png` are written whatever is selected |
+| `--copy-move on\|off` | `on` | Copy-move search; `copymove.png` when a candidate is found |
+| `--ela-quality Q` | `95` | Re-compression quality for ELA (1–100); recorded with the map |
+| `--max-pixels N` | `100000000` | Images with more pixels are not decoded (`ANALYSIS_SKIPPED_SIZE_CAP`); range 1 000 000–2 000 000 000, but the image layer never decodes more than **120 000 000** pixels ([admissibility.md](admissibility.md#consolidated-gap-list) G-IMG3) |
+| `--reference FILE` | none | Known original to compare every item with; repeatable ([§10](#10-reference-images)) |
+| `--fingerprints-db FILE` | none | Extra fingerprint database on top of the bundled and local ones |
+| `--item-reports all\|flagged` | `all` | `flagged`: report files only for items with a finding above info |
+| `--worker-timeout S` / `--worker-memory MB` | 120 / 2048 | Limits of the worker process per image (`PARSER_FAILED` when exceeded) |
+| `--hash`, `--lang`, `--actor`, `--case`, `--jurisdiction`, `--progress`, `--out` | | Common Rakvor options ([usage-cli.md](usage-cli.md)) |
+| `--tsa-url`, `--no-timestamp`, `--sign-cert`, `--sign-pass-env` | | Trust options ([§6](#6-timestamps), [§7](#7-signing-reports)) |
+| `--case-dir`, `--evidence`, `--intake hashinv`, `--hashinv-exe` | | Case folder ([case-folder.md](case-folder.md)) |
 
-**Status and next step per item:** `problem` (a high finding: do not rely on the file until explained),
-`attention` (medium or low: review with the examiner), `ok` (informational only). With
-`--item-reports flagged`, items with status `ok` get no technical/summary/custody files (their derived outputs
-such as `objects.json` are still written and audited, and the skip is logged as `item_reports_skipped`).
+Analyses that always run on every image: structure, metadata, (JPEG) quantization tables and fingerprint lookup,
+(baseline JPEG) double compression, and the embedded-thumbnail comparison when the file has a thumbnail. HEIC
+pixels are never decoded (`HEIC_PIXELS_NOT_DECODED`).
 
-## 4. Using the revision viewer
+## 4. Reading the outputs
 
-After a GUI run, click **Review revisions** on a row with two or more revisions. Pick the revision pair and the
-page; the timeline shows each revision's date (Info ModDate, else CreationDate, else XMP), producer, the time since
-the previous one (red when a revision is dated *before* the previous one — no finding is raised for that in this
-version, so look for it here), signatures and finding badges. The two halves zoom and pan together. Before showing
-a picture the viewer re-hashes it and compares it with the digest recorded during the run: green *matches*, red
-*does NOT match* (the file was changed after the run). The viewer works on the run just completed in that window;
-for an older run, open its `visual/` PNGs and `technical.*` report. Viewing is not logged, on purpose
-([usage-gui.md](usage-gui.md#why-viewing-is-not-logged)).
+```text
+<OUT>/logs/<RUN-ID>/            audit.jsonl, audit.log, hashes.csv, environment.json, timestamp-*.tsr|.json,
+                                review.jsonl (only after maps were viewed in the GUI)
+<OUT>/reports/<RUN-ID>/         statistics.json | .<LANG>.html | .<LANG>.pdf
+  items/<NNNNN>-<NAME>/         technical.*, summary.*, custody.*
+                                structure.json   marker / chunk / box tree with offsets
+                                metadata.json    every tag (EXIF, XMP, IPTC, PNG text, comments)
+                                maps/original.png  lossless preview of the decoded pixels (not HEIC)
+                                maps/ela.png, noise.png, noise-sigma.png, ghost-qNN.png, copymove.png,
+                                thumbnail-diff.png
+```
+
+Start with the **statistics report** (findings by severity and by code, image overview), then the **technical
+review** of each flagged item (findings, metadata summary, XMP history, structure summary, quantization tables,
+fingerprint databases, every map with its parameters, reference comparison table). The **customer summary** is the
+plain-language version for the client. Every section is described in [reports.md](reports.md).
+
+Maps are best examined in the **image viewer** of the desktop app (side by side with the original, synced zoom),
+which also records what you looked at ([usage-gui.md](usage-gui.md#image-viewer)). The PNG files can be opened in
+any viewer, but that viewing is not recorded.
 
 ## 5. Interpreting each finding
 
-Severity in brackets. "Check next" is what an examiner should do before relying on the finding; "do not conclude"
-is the overreach to avoid in a report. The exact wording printed in reports is in `i18n/en.json` (es, fr).
+Each finding in the reports states what it shows and what it does not prove. The checks below are what an examiner
+should do before relying on one. Severities and the full catalogue: [reports.md](reports.md#finding-codes).
 
-| Code | Check next | Do not conclude |
-| --- | --- | --- |
-| `INCREMENTAL_UPDATES` (low) | Open `revisions/`, read the revision table (dates, producer, change kinds) and the visual diff | That the file was tampered with — forms, signatures and comments save this way |
-| `VISUAL_CHANGE_BETWEEN_REVISIONS` (medium) | Look at the PNG; compare the text of both revisions; relate the change to the revision's producer and date | Who made the change or why; a change can be a legitimate correction |
-| `VISUAL_DIFF_SKIPPED` (info) | The reason: PDFium missing, a revision PDFium cannot open (e.g. password); fix and re-run, or compare `revisions/` manually | That the revisions look the same |
-| `METADATA_INFO_XMP_MISMATCH` (medium) | Which field; the XMP history (`technical.json`) and producer of each revision | Falsified content — many tools update only one store |
-| `MODDATE_BEFORE_CREATIONDATE` (high) | Raw values and time zones in the revision table; the producer's known date bugs | Deliberate backdating (clocks, zones, templates) |
-| `REVISION_TIME_GAP` (info) | Whether the gap fits the client's account (e.g. signed on day 1, amended on day 9) | When the change really happened — dates are set by the saving software |
-| `REVISION_DATE_NOT_MONOTONIC` (medium) | Both dates in the revision table; the clock and time zone of the machine that saved the later revision | Backdating — a wrong clock or an editor copying old dates does this too |
-| `PRODUCER_CHANGED_BETWEEN_REVISIONS` (medium) | Which software saved which revision; is it a known workflow (sign tool, form filler)? | Who used the software |
-| `EDITOR_FINGERPRINT` (medium) | What that revision changed (visual diff, objects added/changed) | That content was changed — editors also fill, sign, rotate, compress |
-| `ONLINE_EDITOR_OR_UNLOCKER` (high) | The matched string and field; whether the client used such a service; what that revision changed | Alteration of content; the string can be typed by hand |
-| `PRODUCER_STRUCTURE_MISMATCH` (medium) | The differing traits; whether an optimiser or later re-save explains them | Falsification; versions of one program differ |
-| `UNKNOWN_PRODUCER` (info) | Nothing, unless it matters; consider learning it from known originals | Suspicion — the database is limited |
-| `XREF_OFFSETS_INCONSISTENT` (medium) | Which revisions; the parser warnings with byte offsets (*Parser warnings* table of the technical report, complete list in the item's `warnings.json`; see [theory.md](theory.md#cross-reference-resolution-per-revision)); compare with another parser (qpdf) | Manipulation — buggy writers and damaged transfers do this |
-| `HYBRID_XREF` (low) | Whether the table and stream views differ (warnings) | Anything by itself — some mainstream writers do it |
-| `DATA_AFTER_FINAL_EOF` (medium) | Extract the trailing bytes (offset = end of last revision) and examine them separately | Hidden content — padding and transfer tools add bytes |
-| `SIGNATURE_INTEGRITY_FAILED` (high) | The reason (`digest_mismatch`, `signature_invalid`, `byterange_*`); validate with Acrobat or pyHanko; obtain the file from another source | Who altered the bytes; a damaged transfer can cause it |
-| `SIGNATURE_PRESENT_TRUST_NOT_VERIFIED` (info) | Validate the certificate chain, revocation and signer identity with a separate validator if identity matters | That the signer is who the certificate names |
-| `CONTENT_CHANGED_AFTER_SIGNATURE` (high) | Compare the signed revision (`revisions/rev-NN.pdf` of the signed revision) with the final one, page by page | That the signer did not agree; that the signature is invalid (it remains valid for its revision) |
-| `DOCMDP_VIOLATION` (high) | Which later revisions and change kinds; whether they are only validation data (DSS) under P = 1 ([theory.md B10](theory.md#docmdp)) | Intent; the classification is heuristic and viewers differ |
-| `JAVASCRIPT_PRESENT` (medium) | The listed objects (`objects.json`); analyse scripts in an isolated environment | Malicious behaviour — forms use scripts |
-| `LAUNCH_ACTION` (high) | The target of the action (`objects.json`); treat the file as potentially hostile | That the action ran |
-| `EMBEDDED_FILES` (low) | Open `embedded/`; analyse each attachment as its own evidence item | Anything about intent — attachments are normal |
-| `INVISIBLE_TEXT` (medium) | Which page; is it an OCR layer over a scan, accessibility text, white text on a dark background? Compare with the visual render | An attempt to hide content |
-| `TEXT_OVER_SCANNED_IMAGE` (medium) | In which revision the text first appears; if later than the scan, compare revisions visually | Alteration — scanners add OCR text |
-| `FONT_ADDED_IN_LATER_REVISION` (medium) | What that revision drew with the font (visual diff, content) | Falsification — filling a form or adding a stamp adds fonts |
-| `SCANNED_PAGES_STRUCTURE_ONLY` (info) | If image content matters, use image forensics on `embedded/` | That the image was not retouched |
-| `ENCRYPTED_PARTIAL_ANALYSIS` (info) | Obtain the password lawfully and analyse a decrypted copy if content checks matter | Anything from the absence of content findings |
-| `NOT_A_PDF` (info) | The real type (`detected_type`); use a suitable tool | That the file is malicious |
-| `PARSER_FAILED` (high) | The `reason` (table below); re-run with higher limits; examine manually | That the file is malicious or forged |
-| `EVIDENCE_CHANGED_DURING_ANALYSIS` (high) | Which program touched the file (sync client, antivirus); copy it to write-protected media and run again; the results of this run do not describe the hashed evidence | That the original evidence was altered |
-| `EXTENSION_MISMATCH` (medium) | The detected type; open the file with a suitable tool | Intent to hide anything |
-| `EXECUTABLE_CONTENT` (high) | Treat as hostile; analyse in a sandbox | That the program is malicious |
-| `EMPTY_FILE` (info) | Whether the source has the file with content | That it was emptied on purpose |
-| `DUPLICATE` (info) | The duplicate group in `statistics.*` and `hashes.csv` | Who copied the file or when |
-| `UNREADABLE` (high) | The OS error (permissions, locks); re-acquire | That the file is damaged |
+| Finding | Check before relying on it |
+| --- | --- |
+| `EXIF_SOFTWARE_EDITOR`, `XMP_EDIT_HISTORY` | Which source named the editor; whether an innocent step (rotation, resize, export) explains it; compare the history dates with the capture date |
+| `METADATA_DATES_INCONSISTENT` | Time zones (OffsetTime*), camera clock, software that rewrites DateTime on save |
+| `EXIF_DIMENSIONS_MISMATCH` | Orientation, crop, resize; compare with `THUMBNAIL_MISMATCH` and the reference set |
+| `METADATA_STRIPPED`, `MESSENGER_TRACES` | Obtain the file through another channel (phone, document mode, e-mail) if the original metadata matters |
+| `MAKERNOTE_MISSING_FOR_MAKE` | Check reference images of the same model and firmware: some phones omit it |
+| `QT_STANDARD_IJG`, `QT_NON_STANDARD`, `QT_MATCHES_*`, `QT_UNKNOWN`, `QT_INCONSISTENT_WITH_EXIF_MAKE` | Tables describe the **last encoder**. Learn originals from the claimed device (§9) and compare (§10) |
+| `DOUBLE_COMPRESSION_SIGNS` | Expected after any re-save; a camera original should normally not show it — compare with known originals |
+| `JPEG_GHOST_REGION` | Open the ghost map at that quality; is the dark region an object boundary or a smooth/saturated area? Compare the other qualities |
+| `COPY_MOVE_CANDIDATE` | Open `copymove.png`: are the orange and blue regions repetitive texture (tiles, sky, text) or a meaningful duplicate? Check at full resolution |
+| `THUMBNAIL_MISMATCH` | Open `thumbnail-diff.png`: global difference (crop, rotation, colour) or local (an object)? |
+| `REFERENCE_INCONSISTENT` | Which properties differ; whether the references have the same format, model, firmware and settings |
+| `JPEG_MARKER_ORDER_UNUSUAL`, `DUPLICATE_TABLES`, `PROGRESSIVE_ENCODING` | Which program writes that layout; compare with reference images |
+| `DATA_AFTER_END_MARKER`, `HEIF_UNREFERENCED_DATA`, `PNG_PRIVATE_CHUNKS` | Extract and examine the extra bytes separately (offsets in `structure.json`); MPF secondary images are normal on phones |
+| `PNG_CHUNK_ORDER_INVALID`, `WEBP_FLAGS_MISMATCH`, `HEIF_STRUCTURE_ANOMALY`, `FILE_STRUCTURE_DAMAGED` | Interrupted copy or byte-level edit? Compare with the source if available |
+| `ELA_MAP_WRITTEN`, `NOISE_INCONSISTENCY_MAP` | Info only: say in the report which maps you examined and what you saw, never "the map proves" |
+| `HEIC_PIXELS_NOT_DECODED`, `ANALYSIS_SKIPPED_SIZE_CAP`, `COEFFICIENTS_UNAVAILABLE`, `ELA_NOT_APPLICABLE` | An analysis did not run: nothing is concluded from it; say so |
+| `PARSER_FAILED` | See [§11](#11-troubleshooting-and-exit-codes) |
+
+Also check `technical.json` → `image.pixel_decode_error`: when the pixels of a PNG or WebP cannot be decoded, no
+pixel analysis runs and no finding says so (gap G-IMG4).
 
 ## 6. Timestamps
 
-By default each run asks the TSA (`http://timestamp.digicert.com`, change with `--tsa-url`) to sign the audit
-chain head just before the statistics report is written. The token covers every evidence hash, finding, output
-digest and item-report digest recorded before it ([theory.md B15](theory.md#b15-rfc-3161-trusted-timestamp)).
+By default each run asks the TSA (`http://timestamp.digicert.com`, change with `--tsa-url`) to sign the audit chain
+head just before the statistics report is written.
 
 | Situation | What happens | What to do |
 | --- | --- | --- |
-| TSA reachable | `timestamp_obtained`; files `timestamp-NNNNN.tsr` and `.json` in the log folder; statistics report shows the time | Verify with OpenSSL (below) |
-| Offline | `timestamp_pending`; the run completes; warning on the statistics report | Later, online: `rv-imgauth timestamp <log folder>` |
-| `--no-timestamp` / `RV_NO_TIMESTAMP=1` / GUI unticked | No request | Use `rv-imgauth timestamp` later if needed |
-| Broken chain | `rv-imgauth timestamp` refuses (exit 3): no timestamp is added to a broken log | Investigate; do not repair |
-
-`rv-imgauth verify-log` checks the token's digest, that it covers the logged head, and the TSA's CMS signature
-(signer certificate in the token, ESS binding, message digest, RSA signature, timeStamping key usage). Give it the
-TSA's CA bundle to validate the certificate chain as well:
+| TSA reachable | `timestamp_obtained`; `timestamp-NNNNN.tsr` and `.json` in the log folder | Verify with OpenSSL (below) |
+| Offline | `timestamp_pending`; the run completes; warning on the statistics report | Later: `rv-imgauth timestamp <log folder>` |
+| `--no-timestamp` / `RV_NO_TIMESTAMP=1` / GUI unticked | No request | `rv-imgauth timestamp` later if needed |
+| Broken chain | `rv-imgauth timestamp` refuses (exit 3) | Investigate; do not repair |
 
 ```powershell
 rv-imgauth verify-log <OUT>\logs\<RUN-ID> --tsa-ca C:\certs\tsa-roots.pem
-#     timestamp … covers entry #60: TSA signature valid (signer: …); chain validated to CN=… (revocation not checked)
 ```
 
-Without `--tsa-ca` the line ends with *chain not validated*; a token whose signature or chain fails gives exit 3.
-Revocation, the policy OID and the accuracy are not checked by the tool; check them, and cross-check the result
-with a second tool, with OpenSSL (Git for Windows ships `openssl.exe`):
+Without `--tsa-ca` the output says *chain not validated*. Revocation, policy OID and accuracy are not checked by
+the tool; cross-check with OpenSSL:
 
 ```bash
 cd <OUT>/logs/<RUN-ID>
 N=00060                                                   # from the file name timestamp-00060.tsr
 H=$(python -c "import json;print(json.load(open('timestamp-$N.json'))['head'])")
-openssl ts -reply -in timestamp-$N.tsr -text              # genTime, policy OID, TSA name, serial, accuracy
+openssl ts -reply -in timestamp-$N.tsr -text
 openssl ts -reply -in timestamp-$N.tsr -token_out -out token.der
-openssl pkcs7 -inform DER -in token.der -print_certs > tsa-certs.pem   # certificates sent by the TSA
+openssl pkcs7 -inform DER -in token.der -print_certs > tsa-certs.pem
 openssl ts -verify -digest "$H" -in timestamp-$N.tsr -CAfile <TSA root.pem> -untrusted tsa-certs.pem
-# → "Verification: OK"
 ```
 
-Get the TSA root certificate from the TSA's own repository, not from the token. Record the output in the case
-file: it is the evidence that the time is genuine.
+The review log (`review.jsonl`) is written after the run and is **not** covered by the run's timestamp; its first
+entry is anchored to `run_finished`.
 
-## 7. Signing reports with the examiner certificate
+## 7. Signing reports
 
-`--sign-cert <file.p12|.pfx>` signs **every PDF report** (statistics, technical, summary, custody) with your own
-certificate (RSA keys only). The password is read from the environment variable named by `--sign-pass-env`
-(default `RV_SIGN_PASSWORD`) or asked for on the terminal without echo (`Certificate password (input hidden):`, read from the console with echo off;
-the GUI field is masked too).
-It is never logged; the log records `signing_certificate_loaded` with the subject and the certificate's SHA-256.
-A wrong password stops the run (`run_failed`, exit 1) before any evidence is read. In the GUI: *5. Trust →
-Certificate…*.
+`--sign-cert <file.p12|.pfx>` signs every PDF report (statistics, technical, summary, custody) with your own
+certificate (RSA keys only). The password comes from the variable named by `--sign-pass-env` (default
+`RV_SIGN_PASSWORD`) or a prompt without echo; it is never logged.
 
 ```powershell
 $s = Read-Host "Certificate password" -AsSecureString
 $env:RV_SIGN_PASSWORD = [Runtime.InteropServices.Marshal]::PtrToStringBSTR(
     [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
-rv-imgauth analyze -i E:\export -r --sign-cert C:\certs\ana-ruiz.p12 --case CASE-2026-014
+rv-imgauth analyze -i E:\export -r --sign-cert C:\certs\examiner.p12 --case CASE-2026-014
 Remove-Item Env:RV_SIGN_PASSWORD
-(Get-PfxCertificate C:\certs\ana-ruiz.p12).GetCertHashString("SHA256")   # publish this fingerprint
 ```
-
-Check a signed report with Adobe Acrobat/Reader (Signature panel) or pyHanko:
-`pyhanko sign validate --pretty-print --trust <your CA or certificate .pem> technical.es.pdf`. HTML and JSON
-reports are not signed; their digests are in the timestamped audit chain. The legal weight of this signature
-depends on the certificate ([admissibility.md](admissibility.md) G3).
 
 ## 8. Verifying a run
 
-Anyone — you, a colleague, an opposing expert — can check a run with the log folder, the report folder and the
-evidence copy:
-
-```powershell
-rv-imgauth verify-log D:\cases\CASE-2026-014\rv-imgauth\logs\20261021T103903Z-67d213
-# OK  63 entries, chain intact: …\audit.jsonl
-#     timestamp 2026-10-21T10:39:08Z by http://timestamp.digicert.com covers entry #60
-```
-
 | Step | Command | Proves |
 | --- | --- | --- |
-| 1 | `rv-imgauth verify-log <log> [--tsa-ca <bundle>]` (exit 0 intact, 3 broken) | No entry edited, deleted or reordered; timestamp token matches the head it covers and carries a valid TSA signature (and chain, with `--tsa-ca`) |
-| 2 | `python tests/verify_chain.py <log>` (source tree) | Same, with an independent implementation; also re-hashes the evidence listed in `hashes.csv` |
-| 3 | OpenSSL ([Timestamps](#6-timestamps)) | The TSA really signed that head at that time |
-| 4 | Script below | Every report and output file still has the digest recorded in the log |
-| 5 | Compare `hashes.csv` with the intake registry ([2.1](#21-intake-with-rv-hashinv-into-a-case-folder)) | The analysed files are the registered evidence |
+| 1 | `rv-imgauth verify-log <log> [--tsa-ca <bundle>]` | No audit entry edited, deleted or reordered; timestamp tokens valid; `review.jsonl` intact and anchored to this run ("review entries: N") |
+| 2 | `rv-imgauth verify-case <CASE>` (case folder) | Case log, registry and every run (and its review log) intact |
+| 3 | `python tests/verify_chain.py <log>` (source tree) | Same chain rule, independent implementation; re-hashes the evidence in `hashes.csv` |
+| 4 | OpenSSL ([§6](#6-timestamps)) | The TSA signed that head at that time |
+| 5 | Script below | Every report, map and JSON output still has its audited digest |
 
-Step 4 (no built-in command yet, gap G19) — re-hash every file the run recorded (needs `sha256` among the run's
-algorithms):
+```text
+OK  209 entries, chain intact: …/logs/20261028T155038Z-ccbb83/audit.jsonl
+```
+
+Step 5 (no built-in command yet, gap G19; needs `sha256` among the run's algorithms):
 
 ```bash
 python - "<OUT>/logs/<RUN-ID>" "<OUT>/reports/<RUN-ID>" <<'EOF'
@@ -342,84 +240,65 @@ print(f"{checked} files checked, {bad} mismatches"); sys.exit(3 if bad else 0)
 EOF
 ```
 
-On the sample run this checks 101 files. A single file in PowerShell:
-`(Get-FileHash <file> -Algorithm SHA256).Hash.ToLower()` and search the value in `audit.jsonl`.
+On the sample run (15 images, every map, two references) this checks 296 files.
 
-## 9. Producer fingerprint database
+## 9. Fingerprint database
 
-Three databases are used by every analysis and listed with their SHA-256 in each `item_analyzed` entry and in the
-technical report: the bundled **starter** database, your **local** learned database
-(`%LOCALAPPDATA%\Rakvor\rv-imgauth\fingerprints.local.json`), and an optional **extra** one (`--fingerprints-db`).
-
-```mermaid
-flowchart LR
-    K["Known originals<br/>(you made them with the tool)"] --> L["fingerprints learn"]
-    L --> DB[("local DB<br/>+ fingerprints.audit.jsonl")]
-    DB --> A["analyze<br/>(used automatically)"]
-    DB --> X["fingerprints export"]
-    X --> F[["lab-fingerprints.json"]]
-    F -->|"--fingerprints-db"| A2["analyze on another PC"]
-    F --> D["disclosure to the<br/>opposing expert"]
-```
+The quantization-table hash of every JPEG is looked up in three databases: the bundled **starter** DB, the
+**local** DB learned on this workstation and an optional `--fingerprints-db` file. **The starter DB of this version
+is empty** (`rakvor-starter` version 0): until you learn originals, every JPEG gives `QT_UNKNOWN` (IJG tables are
+still recognised as `QT_STANDARD_IJG`).
 
 ```powershell
-# 1. Make known originals yourself: create a test document in the editor/service, save or download it
-rv-imgauth fingerprints learn .\originals\smallpdf-1.pdf .\originals\smallpdf-2.pdf `
-    --label "Smallpdf (online)" --category online_editor --case LAB-2026-03 --actor "Ana Ruiz"
+# 1. Make known originals yourself with the device or app (or vendor samples), then learn them
+rv-imgauth fingerprints learn originals\IMG_0001.jpg originals\IMG_0002.jpg --label "Phone X camera" --category camera --case CASE-014
 # 2. See what you have (version and SHA-256 of each database)
 rv-imgauth fingerprints list
-# 3. Share or disclose (never overwrites an existing file)
-rv-imgauth fingerprints export --out D:\lab\lab-fingerprints-2026-10.json
-rv-imgauth analyze -i E:\export -r --fingerprints-db D:\lab\lab-fingerprints-2026-10.json
+# 3. Disclose or share (never overwrites an existing file)
+rv-imgauth fingerprints export --out CASE-014-fingerprints.json
 ```
 
-Rules: learn only from files whose origin you can prove; several files keep only the structural traits they all
-share; learning the same label again merges into the entry; nothing is written if any file fails; every change is
-in the hash-chained `fingerprints.audit.jsonl` with the database SHA-256 before and after. When a report relies on
-a match from the local database, export it into the case file — the report cites its SHA-256. Categories:
-office, pdf_library, scanner, pdf_editor, online_editor, unlocker, printer_driver, browser (only pdf_editor,
-online_editor and unlocker raise findings; the others are listed in the technical report).
+Categories: `camera`, `os` (device matches → `QT_MATCHES_DEVICE`, info), `app`, `editor`, `messenger`, `library`
+(→ `QT_MATCHES_EDITOR`, medium; `messenger` also adds `MESSENGER_TRACES`). Learning several files keeps only what all
+of them share (table hash, chroma subsampling, Software/CreatorTool, Make/Model) and logs every change in
+`fingerprints.audit.jsonl` (hash-chained). Learn only from files whose origin you can prove. Local DB:
+`%LOCALAPPDATA%\Rakvor\rv-imgauth\fingerprints.local.json` (Linux/macOS
+`$XDG_DATA_HOME/rakvor/rv-imgauth/`).
 
-## 10. Troubleshooting
+## 10. Reference images
 
-### `PARSER_FAILED` reasons
+`--reference` takes known originals from the claimed device (taken by you with the device, ideally same model,
+firmware, app and settings, and the **same format** as the questioned image). They are read-only and their SHA-256
+is recorded in the report.
 
-| `reason` | Meaning | Action |
-| --- | --- | --- |
-| `timeout` | Worker killed after `--worker-timeout` seconds | Re-run that file with `--worker-timeout 600` |
-| `memory_limit` | Worker exceeded `--worker-memory` | Re-run with `--worker-memory 4096` (or more) |
-| `crashed` | Worker ended abnormally (exit code or signal in `exit_code`, stderr tail in the technical report) | Re-run once; if repeatable, examine manually and report the file (privately) to engineering |
-| `bad_output` | Worker reply not valid JSON or too large | As `crashed` |
-| `spawn_failed` / `isolation_failed` | Worker could not start, or the Windows Job Object could not be set | Check antivirus blocking `rv-imgauth.exe worker …`; run again |
-| `unreadable` | The file could not be memory-mapped read-only | Check permissions / locks |
-| `panic` | Internal parser error (should not happen) | Report to engineering with the file's hash |
+- A property is compared only when every reference has the same value for it ("varies" otherwise).
+- The result is "consistent" or "inconsistent with the reference set (n = …)", with a per-property table in the
+  technical report.
+- Use at least two references: with one, every property counts as shared.
+- A PNG, WebP or HEIC item compared with JPEG references is reported inconsistent on format alone (G-IMG6).
 
-Files left by a failed worker are kept as `partial_output` (hashed, audited) and support no finding.
+## 11. Troubleshooting and exit codes
 
-### `VISUAL_DIFF_SKIPPED` reasons
+| Exit code | Meaning |
+| :-: | --- |
+| 0 | Completed; no high-severity finding |
+| 1 | Runtime error (input not found, output not writable, case log locked…) |
+| 2 | Usage error (unknown option, more than two hash algorithms, unsupported language; case-folder usage errors) |
+| 3 | Completed with at least one high-severity finding, or a broken audit/review log or case folder |
+| 130 | Cancelled with Ctrl+C (partial reports written) |
 
-| Reason text | Action |
+`fingerprints`, `verify-log`, `verify-case`, `timestamp` and `self-test` have their own codes, listed in
+[usage-cli.md](usage-cli.md).
+
+| Symptom | Cause and fix |
 | --- | --- |
-| `PDFium library not found or not loadable: …` (paths tried) | Restore `pdfium.dll` next to the executables or set `RV_PDFIUM_PATH` ([installation.md](installation.md#6-check-pdfium-visual-diff-renderer)) |
-| `revisions A→B: PDFium cannot open this revision: …` | Password-protected (no password is tried) or a damaged prefix; compare `revisions/` manually |
-
-The visual diff is *not applicable* (no finding) for single-revision files or with `--visual-diff off`.
-
-### Exit codes
-
-| Command | 0 | 1 | 2 | 3 | 130 |
-| --- | --- | --- | --- | --- | --- |
-| `analyze` | done, no high finding | runtime error (input not found, output not writable, wrong certificate password, missing `--fingerprints-db` file) | usage error (three algorithms, unknown language) | done, ≥ 1 high finding | cancelled (Ctrl+C), partial reports written |
-| `verify-log` | intact, tokens verify | log or `--tsa-ca` file unreadable | — | broken chain, token mismatch, invalid TSA signature or untrusted chain | — |
-| `timestamp` | obtained and logged | TSA unreachable (nothing changed) | — | broken log (nothing added) | — |
-| `self-test` | all pass | a failure: do not use the build | — | — | — |
-| `fingerprints learn / list / export` | done | file not a PDF / no producer / DB unreadable / output exists | usage error | — | — |
-
-### Other messages
-
-| Message | Fix |
-| --- | --- |
-| `cannot load signing certificate …: wrong password or unsupported file` | Check `RV_SIGN_PASSWORD`; the file must be a `.p12`/`.pfx` with a private key |
-| `only RSA signing certificates are supported` | Use an RSA certificate (ECDSA is not supported for report signing) |
-| `warning: timestamp pending (…)` | See [Timestamps](#6-timestamps) |
-| Report folder for an item is missing | `--item-reports flagged` and the item was `ok` (see `item_reports_skipped` in the log) |
+| `PARSER_FAILED` reason `timeout` | Very large or pathological image: `--worker-timeout 600` |
+| `PARSER_FAILED` reason `memory_limit` | `--worker-memory 4096` on a machine with enough RAM |
+| `PARSER_FAILED` reason `crashed` / `bad_output` | Keep the file and the log; report it (it should not happen); examine manually |
+| `PARSER_FAILED` "image structure not readable" | The file is not parseable as the format its signature claims |
+| `ANALYSIS_SKIPPED_SIZE_CAP` | Above `--max-pixels` (pixel analyses) or above 24 MP (ghosts). Raise `--max-pixels` up to 120 000 000 |
+| `COEFFICIENTS_UNAVAILABLE` | Progressive or arithmetic-coded JPEG, or damaged entropy data: no double-compression check |
+| No maps for a PNG or WebP | Pixels did not decode: see `image.pixel_decode_error` in `technical.json` |
+| `HEIC_PIXELS_NOT_DECODED` | By design in this version |
+| `EVIDENCE_CHANGED_DURING_ANALYSIS` | Another program changed the file between the two reads: re-run on a write-protected copy |
+| GUI: "Could not write this run's review log" | The run's audit log no longer verifies or the folder is read-only; the view is recorded in the next run's audit log instead |

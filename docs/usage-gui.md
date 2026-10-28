@@ -1,24 +1,25 @@
 # Using the desktop app (Windows 10/11)
 
-Start **RV ImgAuth** from the Start menu (installer) or double-click `rv-imgauth-gui.exe` (portable zip).
-No installation of other software is required; the app also runs on virtual machines without a graphics
-driver (software rendering, no GPU code of its own).
+Start **RV ImgAuth** from the Start menu (installer) or double-click `rv-imgauth-gui.exe` (portable zip). The
+window and the executables carry the Rakvor icon. No other software is required; the app also runs on virtual
+machines without a graphics driver (software rendering).
 
-![Main window after reviewing the sample evidence](images/gui-main.png)
+![Image viewer: original and copy-move overlay side by side, findings, structure and metadata panels](img/viewer.png)
 
 ## Workflow
 
 ```mermaid
 flowchart TD
-    A["1 · Evidence<br/>Add files… / Add folder… / drag & drop / type a path"] --> B
-    B["2 · Hash algorithms<br/>tick 1 or 2 (a third box is disabled)"] --> O
-    O["3 · Options<br/>revisions · visual diff (DPI, page cap) · objects · embedded<br/>worker limits · extra fingerprint DB · item reports"] --> C
-    C["4 · Reports + 5 · Trust<br/>language · output folder · examiner · case ID · timestamp · certificate"] --> D
+    A["1 · Evidence<br/>files, folders, drag and drop, path<br/>optional case folder + RV HashInv intake"] --> B
+    B["2 · Hash algorithms<br/>tick 1 or 2"] --> O
+    O["3 · Options<br/>maps · copy-move · ELA quality · largest image<br/>worker limits · item reports · references · extra fingerprint DB"] --> C
+    C["4 · Reports + 5 · Trust<br/>language · output folder · examiner · case ID<br/>custody form · timestamp · certificate"] --> D
     D["Start review"] --> E{"Running"}
-    E -->|progress bar, elapsed, remaining| E
-    E -->|Cancel| F["Partial reports + run_cancelled in the log"]
+    E -->|progress, elapsed, remaining| E
+    E -->|Cancel| F["Partial reports + run_cancelled"]
     E -->|done| G["Results table · Open report · Open log folder"]
-    G -->|Review revisions| V["Revision viewer<br/>timeline · previous | current · findings"]
+    G -->|View image| V["Image viewer<br/>original | overlay · findings · structure · metadata"]
+    V -->|each map shown| R[("review.jsonl<br/>ui_map_viewed")]
     V -->|Back to results| G
 ```
 
@@ -26,88 +27,100 @@ flowchart TD
 
 | Area | What it does |
 | --- | --- |
-| **1. Evidence** | *Add files…* and *Add folder…* open the Windows pickers. You can also drag files or folders onto the window (or onto the `rv-imgauth-gui.exe` icon before it starts), or paste a path and press Enter. *Include subfolders* is on by default. Remove an entry with **x**. *Case folder* links the run to a shared case ([case-folder.md](case-folder.md)); once it is set, *Register the evidence with RV HashInv first* runs rv-hashinv on the same evidence before the analysis — the window shows the rv-hashinv version it found (hover: path and SHA-256) or, in red, why none can be used. During the intake a line shows *Intake (RV HashInv): n/N files*; afterwards **Open hash report** opens rv-hashinv's report. |
-| **2. Hash algorithms** | Tick one or two. When two are ticked, the others are disabled; you cannot untick the last one. |
-| **3. Options** | How deep the PDF analysis goes (see the table below). Defaults suit almost every case. |
-| **4. Reports** | Language (English, Español, Français, or all three), output folder, examiner name (defaults to your Windows user), optional case ID. |
-| **5. Trust** | *Trusted timestamp* (on by default; TSA address editable), *Certificate…* to pick your `.p12`/`.pfx` and its password (kept in memory only, never logged) so every PDF is signed, and *Custody form* (Colombia / France). |
-| **Interface language** | Top-right selector: English, Español, Français. Changes every label immediately; independent of the report language. |
-| **Start review / Cancel** | Start is enabled once evidence is added. During a run the settings are locked and the button becomes *Cancel*. |
-| **Progress** | Bar by bytes processed, `files done / total`, elapsed time (always moving) and estimated time remaining. The file being read is shown below. |
-| **Result** | Counts by severity, **Open report** (statistics page in your language), **Open log folder**, and the **Results** table: one row per file with its status, number of findings (and the highest severity) and number of revisions. **Review revisions** is enabled for files with two or more revisions. |
+| **1. Evidence** | *Add files…* and *Add folder…*, drag and drop onto the window (or onto the executable's icon), or paste a path and press Enter. *Include subfolders* is on by default. *Case folder* links the run to a shared case ([case-folder.md](case-folder.md)); once set, *Register the evidence with RV HashInv first* runs rv-hashinv before the analysis (the version found is shown; hover for its path and SHA-256; in red when none can be used). |
+| **2. Hash algorithms** | Tick one or two; you cannot untick the last one. |
+| **3. Options** | Image analyses, limits, references (table below). |
+| **4. Reports** | Report language (English, Español, Français or all three), output folder (locked to the case folder when one is set), examiner, case ID. |
+| **5. Trust** | *Custody form* (Colombia / France), *Trusted timestamp* (on by default), signing certificate and its password (memory only, never logged). |
+| **Interface language** | Top-right selector; independent of the report language. |
+| **Start review / Cancel** | During a run the settings are locked and the button becomes *Cancel*. |
+| **Progress** | Bar by bytes, files done / total, elapsed time and estimated time remaining; the current file. During an intake: *Intake (RV HashInv): n/N files*. |
+| **Result** | Counts by severity, **Open report**, **Open log folder**, **Open hash report** (after an intake), and the **Results** table: file, status (ok / attention / problem), number of findings with the highest severity, number of maps, evidence id in a case, and **View image**. |
 
 ### 3. Options
 
-Every option maps 1:1 onto the engine's analysis settings (the same ones the command line uses).
+Every option maps 1:1 onto the command-line option of the same name ([usage.md](usage.md#3-analysis-options)).
 
-| Option | Default | Effect |
+| Option | Default | CLI equivalent |
 | --- | --- | --- |
-| Extract each revision | on | Writes `revisions/rev-NN.pdf` (exact byte prefixes of the evidence, each hashed in the log). |
-| Visual diff between revisions | on | Renders the pages of each revision pair with PDFium and writes `visual/rev-NN-vs-MM-page-PPP.png` for changed pages. |
-| DPI / Page cap | 110 / 50 | Rendering resolution and how many pages per pair are compared (pages beyond the cap are reported as not compared). |
-| Object dump | on | Writes `objects.json` (the object tree of every revision). |
-| Extract embedded files and images | on | Writes `embedded/` (attachments and image streams, raw and inflated). |
-| Worker limits | 120 s / 2048 MB | Each PDF is analysed in a separate worker process; a crash, hang or memory blow-up becomes a `PARSER_FAILED` finding instead of stopping the review. |
-| Extra fingerprint DB | none | A JSON database of producer/editor fingerprints used on top of the bundled one. Must exist when Start is pressed. |
-| Item reports | All items | *Flagged items only* skips the per-file reports for files with nothing above informational. |
+| Analysis maps: *Error level (ELA)*, *Noise*, *JPEG ghosts* | ELA and Noise | `--maps` |
+| *Copy-move detection* | on | `--copy-move` |
+| *ELA JPEG quality* (presets 75, 85, 90, 95, 100) | 95 | `--ela-quality` |
+| *Largest image* (presets 25, 50, 100, 200, 500, 1000 Mpx) | 100 Mpx | `--max-pixels` (the image layer never decodes more than 120 Mpx: presets above it have no effect) |
+| *Worker limits*: timeout (s) and memory (MB) | 120 s / 2048 MB | `--worker-timeout`, `--worker-memory` |
+| *Item reports*: All items / Flagged items only | All items | `--item-reports` |
+| *Reference images*: type a path and press Enter (several separated by `;`), *Add reference*, *Browse…*, remove with **x** | none | `--reference` (repeated) |
+| *Extra fingerprint DB* | none | `--fingerprints-db` |
 
-Numeric options are picked from preset values (the current value is always listed), so each choice is one
-recorded change rather than a stream of edits.
+Numeric options are picked from presets (the current value is always listed), so each choice is one recorded
+change.
 
-## Revision viewer
+## Image viewer
 
-![Revision viewer: revision 1 vs 2 of edited-incremental.pdf, zoomed on the changed amount](images/gui-revision-viewer.png)
+**View image** on a results row opens the viewer for that item. It is built from the run's own outputs (the
+preview `maps/original.png`, the maps, `structure.json`, `metadata.json` and the findings), never from the evidence.
 
-Open it with **Review revisions** on a row of the results table. It reads the run's own outputs: the revision
-data and findings the engine returned, and the diff pictures in `reports/<run>/items/<NNNNN-name>/visual/`.
-
-| Part | What it shows |
+| Control | What it does |
 | --- | --- |
-| **Item / Revisions / Page** | Pick the file, the revision pair (`Rev r-1 vs r`, marked *changed* or *no visual change*) and the page (changed pages show the changed share of pixels). Opening an item jumps to its first pair with a change and that pair's first changed page. |
-| **Timeline** | One card per revision: date (Info ModDate, else CreationDate, else XMP), producer, time since the previous revision (red when a revision is dated *before* the previous one), signature, and badges for the findings attached to that revision, coloured by severity. The selected pair is outlined; click a card to compare it with the revision before it. |
-| **Previous / Current** | The two halves of the diff picture side by side, changed regions outlined in violet by the engine and highlighted in cyan by the viewer. The mouse wheel zooms at the pointer, dragging pans, double-click (or **Fit**) resets; both halves always move together. **–** / **+** zoom in steps (50 % to 1600 % of "fit"). |
-| **Digest check** | Before showing a picture the viewer hashes it and compares it with the digest written to the audit log during the run: green *matches*, red *does NOT match* (the file was changed after the run). |
-| **Findings for this item** | Every finding of the file, most severe first, with what it **shows** and what it **does not prove**, in the interface language. |
+| *Back to results* | Returns to the results table |
+| *Item* | Switches to another item of the run |
+| *Overlay* (map selector) | Error level (ELA) · Noise residual · Noise level (σ) · Copy-move · JPEG ghost qNN · Thumbnail difference — only the maps written for this item |
+| *View*: **Side by side** | Original on the left, overlay on the right, with **one shared zoom and pan**: the same region stays under the cursor on both sides |
+| *View*: **Blended** | The overlay drawn over the original, with an *Overlay opacity* slider |
+| *Zoom* (−, +, *Fit*) | 50 % to 1600 %; mouse wheel zooms at the cursor, drag pans, double-click resets |
+| Pixel readout | Under the pictures: *Pixel x, y* of the original under the cursor, and the matching pixel of the overlay (maps of another size, such as the half-resolution σ map, are stretched onto the original's frame) |
+| Digest check | For the original preview and the overlay: *Picture matches the digest in the audit log* (green), *does NOT match* (red: the file changed after the run), or *No audited digest* (grey) |
+| *Parameters recorded with this map* | The map's parameters as written in the report (quality, gain, encoder and version, block sizes, thresholds) |
+| Fixed sentence | "Maps are a visual aid that needs interpretation by a trained examiner; they are not a result and prove nothing by themselves." |
 
-When the visual diff did not run (PDFium missing, option off), the viewer still shows the timeline and the
-findings and says why there is no picture.
+The right-hand panel has three collapsible sections:
 
-The viewer shows the run just completed in this window (it uses the results the engine returned, and the digests
-recorded for each picture during that run). An older run cannot be reopened in the viewer: open its `visual/`
-PNGs and `technical.*` report instead, and check their digests as described in
-[usage.md](usage.md#8-verifying-a-run). How to read each finding: [usage.md](usage.md#5-interpreting-each-finding).
+- **Findings for this item**, most severe first, each with *Shows* and *Does not prove* in the interface language;
+- **File structure**: the marker / chunk / box tree with *Element*, *Offset* and *Length* from `structure.json`;
+- **Metadata**: a filterable *Group / Tag / Value* table from `metadata.json`, the **XMP edit history**, and the
+  problems met while reading (*Could not be read*).
 
-### Why viewing is not logged
+When there is no preview the viewer says why: HEIC pixels are not decoded in this version; the pixels could not be
+decoded; the image is larger than *Largest image*; or the file is not an image at all.
 
-The audit log of a run is **closed** when the run finishes: its last entry is `run_finished`, its head may be
-covered by a trusted timestamp, and `verify-log` checks the chain as it was sealed. Opening the viewer later does
-not change any evidence or output — it only reads files whose digests are already in that chain (and re-checks
-them on screen). Writing a separate "viewer note" next to the sealed log would put unchained, untimestamped data in
-the log folder that a reader could mistake for part of the record, so the viewer deliberately writes nothing. What
-the examiner saw is fully reproducible from the run's outputs; conclusions belong in the examiner's own report.
+### The review log
+
+Viewing is part of the record. Each time a map is shown for an (item, map, view mode) that has not been shown
+before, the GUI appends a **`ui_map_viewed`** entry to the reviewed run's **`review.jsonl`**, next to its
+`audit.jsonl`:
+
+```json
+{"seq": 1, "at_utc": "…", "actor": "…", "action": "ui_map_viewed", "run_id": "20261028T…",
+ "anchor_seq": 209, "anchor_hash": "<entry_hash of run_finished>", "prev_entry_hash": "<same>",
+ "details": {"item": "pix-copy-move.jpg", "index": 8, "evidence_id": null, "map": "maps/copymove.png",
+             "map_kind": "copy_move", "mode": "side_by_side", "opacity": null, "original_shown": true,
+             "map_digest": {"algorithm": "sha256", "value": "…"}, "run_id": "20261028T…"},
+ "entry_hash": "…"}
+```
+
+`review.jsonl` is a hash chain of its own, anchored to the run's `run_finished` entry (the run's audit chain is
+closed by then). `rv-imgauth verify-log` and `verify-case` check it ("review entries: N"); an edited, re-ordered or
+foreign entry fails them with exit 3. If the review log cannot be written (the run's audit log no longer verifies,
+or the folder is read-only), the status line says so and the view is recorded in the next run's audit log instead.
 
 ## What the GUI records
 
-Your choices are part of the evidence record. Before the run starts, the GUI writes them to the audit log, each
-with the time it happened (`at_utc`):
+Before the run starts, the GUI writes every choice to the run's audit log, each with its time:
 
 | Action | Logged as |
 | --- | --- |
-| Add / remove evidence | `ui_input_added`, `ui_input_removed` |
-| Change hash selection | `ui_hash_selection_changed` |
-| Change language / subfolders | `ui_language_changed`, `ui_recursive_changed` |
-| Interface language, custody form, timestamp, certificate | `ui_interface_language_changed`, `ui_jurisdiction_changed`, `ui_timestamp_changed`, `ui_signing_certificate_changed` |
-| Options | `ui_extract_revisions_changed`, `ui_visual_diff_changed`, `ui_dpi_changed`, `ui_max_pages_changed`, `ui_objects_dump_changed`, `ui_extract_embedded_changed`, `ui_worker_timeout_changed`, `ui_worker_memory_changed`, `ui_fingerprints_db_changed`, `ui_item_reports_changed` |
-| Press Start | `ui_start_clicked` (final settings, including all options) |
-| Press Cancel | `item_cancelled`, `run_cancelled` |
+| Add / remove evidence, subfolders | `ui_input_added`, `ui_input_removed`, `ui_recursive_changed` |
+| Case folder, intake | `ui_case_dir_changed`, `ui_intake_changed` |
+| Hash selection, report language, interface language | `ui_hash_selection_changed`, `ui_language_changed`, `ui_interface_language_changed` |
+| Custody form, timestamp, certificate | `ui_jurisdiction_changed`, `ui_timestamp_changed`, `ui_signing_certificate_changed` |
+| Options | `ui_maps_changed`, `ui_copy_move_changed`, `ui_ela_quality_changed`, `ui_max_pixels_changed`, `ui_references_changed`, `ui_worker_timeout_changed`, `ui_worker_memory_changed`, `ui_fingerprints_db_changed`, `ui_item_reports_changed` |
+| Start | `ui_start_clicked` (final settings, all options) |
+| Cancel | `item_cancelled`, `run_cancelled` |
+| After the run: maps viewed | `ui_map_viewed` in the run's `review.jsonl` |
 
-Errors during the run appear under **Warnings** and in the log as `item_error`.
-Validation messages shown *before* a run (e.g. "Add at least one file or folder", a missing fingerprint database)
-are not logged, because no run — and therefore no log — exists yet. Using the revision viewer after the run is not
-logged (see above).
+Validation messages before a run are not logged (no run, no log yet).
 
 ## Same results as the command line
 
-The GUI calls the same engine as `rv-imgauth analyze`. A GUI run with the same evidence, algorithms, options and
-language gives identical hashes and findings; `environment.json` records `"frontend": "gui"` and the settings used
-(including `options={…}`).
+The GUI calls the same engine as `rv-imgauth analyze`. A GUI run with the same evidence and options gives identical
+hashes, findings and maps; `environment.json` records `"frontend": "gui"`.

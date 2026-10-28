@@ -9,7 +9,9 @@ that the record was not altered.
 | `audit.jsonl` | One JSON object per action, hash-chained (authoritative) |
 | `audit.log` | The same actions as readable text (convenience copy) |
 | `hashes.csv` | Hash register: `index,path,size,<algo1>[,<algo2>],status,error` |
-| `environment.json` | Tool version, compiler, target, every dependency version, OS, host, OS user, working folder, command line |
+| `environment.json` | Tool version, compiler, target, every dependency version (incl. `jpeg-encoder` and `zune-jpeg`, which shape the maps), OS, host, OS user, working folder, command line |
+| `review.jsonl` | Written only after the run, when maps are viewed in the GUI image viewer: a second hash chain anchored to `run_finished` ([below](#review-log-viewing-after-the-run)) |
+| `timestamp-<N>.tsr` / `.json` | RFC 3161 token for the chain head and its readable summary |
 
 ## The hash chain
 
@@ -75,9 +77,32 @@ sequenceDiagram
 - `--no-timestamp` (or `RV_NO_TIMESTAMP=1`) disables it; tests use a local TSA (`tests/fake_tsa.py`).
 - **Limitation:** a timestamp proves the log existed at that time, not that its content is true.
 
+## Review log: viewing after the run
+
+The run's chain is closed at `run_finished` (`verify-case` rejects any later entry except `timestamp_obtained`).
+What the examiner looks at afterwards in the desktop **image viewer** is still part of the record, so it goes into
+`review.jsonl` next to `audit.jsonl`:
+
+```mermaid
+flowchart LR
+    AN["audit.jsonl #N<br/>run_finished<br/>entry_hash H"] --> R1["review #1 ui_map_viewed<br/>anchor_seq N · anchor_hash H<br/>prev_entry_hash H"]
+    R1 --> R2["review #2 ui_map_viewed<br/>prev = hash of #1"]
+    R2 --> R3["…"]
+```
+
+- Same entry rule as `audit.jsonl` (`seq`, `at_utc`, `actor`, `action`, `run_id`, `details`, `prev_entry_hash`,
+  `entry_hash` = SHA-256 of the canonical JSON); the first entry adds `anchor_seq` / `anchor_hash`.
+- One `ui_map_viewed` per (item, map, view mode) shown: item name, index, evidence id, map path and kind, mode
+  (`side_by_side` or `blend`) and opacity, whether the original was shown, and the map's audited digest.
+- The GUI refuses to append to a review log, or to an audit log, that does not verify; it then records the view in
+  the next run's audit log and says so on screen.
+- `rv-imgauth verify-log <log folder>` and `verify-case` check it: intact chain, first entry anchored to this run's
+  `run_finished`, every entry naming this run; a broken review log gives exit 3.
+- It is not covered by the run's RFC 3161 token (written before it); keep it with the log folder.
+
 ## Signed PDF reports
 
-`--sign-cert examiner.p12` (GUI: *4. Trust → Certificate*) signs every PDF — statistics, technical, summary and
+`--sign-cert examiner.p12` (GUI: *5. Trust → Signing certificate*) signs every PDF — statistics, technical, summary and
 custody — with **your own** certificate. The password comes from the environment variable named by
 `--sign-pass-env` (default `RV_SIGN_PASSWORD`) or an interactive prompt; it is never written to any log.
 The log records `signing_certificate_loaded` with the certificate subject and SHA-256 fingerprint; a wrong password
@@ -102,15 +127,16 @@ legal advice: check it against the current official form.
 | Action | When | Key details |
 | --- | --- | --- |
 | `run_started` | first | tool, version, frontend, algorithms, langs, inputs, case |
-| `ui_*` | GUI only, before the run | input added/removed, hash selection, language, recursive, start clicked |
+| `ui_*` | GUI only, before the run | input added/removed, hash selection, languages, recursive, case folder, intake, maps, copy-move, ELA quality, largest image, references, worker limits, fingerprint DB, item reports, start clicked |
 | `environment_recorded` | | digests of `environment.json` |
 | `inputs_resolved` | | number of items and bytes |
 | `item_started` | each item | index, size, modified time |
 | `item_hashed` | each item | digests, bytes read, `mtime_unchanged` |
 | `item_error` | unreadable item | error message |
 | `analysis_started` | each item | isolation (`worker_process` or `in_process`) |
-| `output_written` / `output_missing` | each derived file | kind, path under `items/`, size, digests (revisions, visual diffs, objects dump, embedded files) |
-| `item_analyzed` | each item | detected type, extension, findings, status; `analysis`: fingerprint databases (name, version, SHA-256), PDFium library (path, SHA-256, pinned tag), worker outcome, visual-diff status, `evidence_rehash` (second-pass digest of the parsed bytes vs the first pass) |
+| `evidence_verified_against_case` / `evidence_not_in_case_registry` | each item, with `--case-dir` | match, matched by, expected and actual digests |
+| `output_written` / `output_missing` | each derived file | kind (`structure`, `metadata`, `original_preview`, `map`, `partial_output`, `unlisted_output`), path under `items/`, size, digests |
+| `item_analyzed` | each item | detected type, extension, findings, status; `analysis`: `image_analysis` status, fingerprint databases (role, name, version, SHA-256, entries), worker outcome (time, limits, network isolation), `evidence_rehash` (second-pass digest vs the first pass) |
 | `item_cancelled` / `run_cancelled` | on cancel | processed count |
 | `duplicate_group` | after the loop | hash, item indexes |
 | `hash_register_written` | | digests of `hashes.csv` |
@@ -119,6 +145,7 @@ legal advice: check it against the current official form.
 | `timestamp_obtained` / `timestamp_pending` | before the statistics report | covered entry, head, TSA, genTime, token SHA-256 / reason |
 | `statistics_report_written` | | digests of statistics files |
 | `run_finished` / `run_failed` | last | totals, severities, elapsed |
+| `ui_map_viewed` | after the run, in `review.jsonl` | item, map, mode, opacity, map digest |
 
 ## Evidence handling
 
@@ -141,11 +168,11 @@ flowchart LR
 | 27037 principle / activity | How RV ImgAuth supports it |
 | --- | --- |
 | Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash |
-| Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input → same hashes |
+| Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input → same hashes, findings and byte-identical maps |
 | Reproducibility (5.3.4) | Independent verifier (`tests/verify_chain.py`) and standard algorithms |
 | Justifiability (5.3.5) | Every finding states what it shows and what it does **not** prove; limitations in every report |
 | Preservation (spoliation and tampering, 3.19 and 3.21) | Read-only access; hashes of every file and of every report produced |
-| Documentation / chain of custody | Hash register, reports, and log folder form the record of the examination |
+| Documentation / chain of custody | Hash register, reports, log folder and review log form the record of the examination, including which maps the examiner looked at |
 
 Colombian practice (Ley 906 de 2004, Manual de cadena de custodia) and French practice (Code de procédure
 pénale, art. 156 ff. for expertise) both expect the examiner to document the method and preserve integrity;
@@ -153,4 +180,4 @@ the log folder plus the reports are that documentation for this step of the exam
 
 The full requirement-by-requirement mapping (Colombia, France/EU, ISO/IEC 27037/27041/17025, US/UK), with
 verification marks, gaps and an examiner checklist, is in [admissibility.md](admissibility.md). Why the chain and
-the timestamp work: [theory.md](theory.md#b14-the-audit-hash-chain).
+the timestamp work: [theory.md](theory.md#b20-audit-chain-review-log-and-timestamp).
