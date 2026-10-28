@@ -263,6 +263,11 @@
       "shows": "Les métadonnées n'ont pas pu être lues entièrement : %{problems}.",
       "does_not_prove": "Des bogues logiciels comme des modifications au niveau des octets endommagent les métadonnées ; cela ne montre pas lequel s'est produit."
     },
+    "FILE_STRUCTURE_DAMAGED": {
+      "title": "Structure du fichier endommagée ou tronquée",
+      "shows": "La structure propre du fichier est endommagée : %{problems}. Toutes les parties lisibles ont tout de même été examinées.",
+      "does_not_prove": "Des copies ou téléchargements interrompus, un support défaillant et des modifications au niveau des octets endommagent tous un fichier ; cela ne montre pas lequel s'est produit, ni que le contenu de l'image a été modifié."
+    },
     "THUMBNAIL_MISMATCH": {
       "title": "La vignette intégrée diffère de l'image",
       "shows": "L'aperçu stocké dans le fichier diffère de l'image principale (%{difference}). L'image des différences est dans maps/thumbnail-diff.png.",

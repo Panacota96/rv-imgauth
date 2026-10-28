@@ -1,11 +1,11 @@
 {
+  "coefficients": "unsupported",
   "file": "screenshot.png",
   "format": "png",
-  "width": 400,
   "height": 300,
   "signals": [
     "METADATA_DATES_INCONSISTENT"
   ],
-  "coefficients": "unsupported",
-  "thumbnail": false
+  "thumbnail": false,
+  "width": 400
 }

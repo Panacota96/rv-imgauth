@@ -489,13 +489,19 @@ mod tests {
             crate::hash::HashAlgo::Sha256,
         );
         let a = run(&photo, &item, Some((crate::hash::HashAlgo::Sha256, &good)));
+        // The parser reads what it can and reports the damage; the analysis still finishes.
         let f = a
             .findings
             .iter()
-            .find(|f| f.code == "PARSER_FAILED")
-            .unwrap();
-        assert_eq!(f.severity, Severity::High);
-        assert_eq!(a.details["image_analysis"], "not_completed");
+            .find(|f| f.code == "FILE_STRUCTURE_DAMAGED")
+            .unwrap_or_else(|| panic!("{:?}", a.findings));
+        assert_eq!(f.severity, Severity::Medium);
+        assert!(
+            a.findings
+                .iter()
+                .any(|f| f.code == "COEFFICIENTS_UNAVAILABLE")
+        );
+        assert_eq!(a.details["image_analysis"], "completed");
         assert_eq!(a.details["evidence_rehash"]["match"], true);
         assert!(a.details["fingerprint_dbs"].is_array());
 

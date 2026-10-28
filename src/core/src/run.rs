@@ -1072,7 +1072,7 @@ mod tests {
         .unwrap();
         assert_eq!(s.items, 3);
         assert_eq!(s.medium, 1); // extension mismatch
-        assert_eq!(s.info, 3); // duplicate pair + ANALYSIS_NOT_IMPLEMENTED
+        assert_eq!(s.info, 2); // the duplicate pair (the .jpg is a PDF: no image analysis findings)
         assert!(crate::audit::verify(&s.log_dir.join("audit.jsonl")).is_ok());
         for f in ["audit.log", "hashes.csv", "environment.json"] {
             assert!(s.log_dir.join(f).exists(), "{}", f);

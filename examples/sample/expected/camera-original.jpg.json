@@ -1,9 +1,9 @@
 {
+  "coefficients": "ok",
   "file": "camera-original.jpg",
   "format": "jpeg",
-  "width": 1200,
   "height": 900,
   "signals": [],
-  "coefficients": "ok",
-  "thumbnail": true
+  "thumbnail": true,
+  "width": 1200
 }

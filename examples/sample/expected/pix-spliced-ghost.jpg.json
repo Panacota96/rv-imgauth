@@ -4,7 +4,10 @@
     "NOISE_INCONSISTENCY_MAP",
     "QT_STANDARD_IJG"
   ],
+  "coefficients": "ok",
   "file": "pix-spliced-ghost.jpg",
+  "format": "jpeg",
+  "height": 768,
   "maps": [
     "ghost-q60.png",
     "ghost-q70.png",
@@ -12,5 +15,10 @@
     "ghost-q90.png",
     "noise-sigma.png",
     "noise.png"
-  ]
+  ],
+  "signals": [
+    "METADATA_STRIPPED"
+  ],
+  "thumbnail": false,
+  "width": 1024
 }

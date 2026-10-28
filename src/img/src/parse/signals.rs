@@ -673,15 +673,41 @@ pub fn metadata(p: &ParsedImage) -> Vec<Signal> {
     }
 
     // ---- problems
-    if !md.problems.is_empty() {
-        let shown: Vec<&str> = md.problems.iter().take(8).map(String::as_str).collect();
-        let mut t = shown.join("; ");
-        if md.problems.len() > 8 {
-            t.push_str(&format!("; and {} more", md.problems.len() - 8));
-        }
-        v.push(sig("METADATA_PROBLEMS").with("problems", t));
+    // The parsers prefix damage to the file's own structure (truncation, bad CRC, stray bytes) with
+    // "<FORMAT> structure:"; that is reported apart from unreadable metadata.
+    let (structural, meta): (Vec<&String>, Vec<&String>) =
+        md.problems.iter().partition(|p| is_structure_problem(p));
+    if !structural.is_empty() {
+        v.push(sig("FILE_STRUCTURE_DAMAGED").with("problems", join_problems(&structural)));
+    }
+    if !meta.is_empty() {
+        v.push(sig("METADATA_PROBLEMS").with("problems", join_problems(&meta)));
     }
     v
+}
+
+fn is_structure_problem(p: &str) -> bool {
+    [
+        "JPEG structure:",
+        "PNG structure:",
+        "WebP structure:",
+        "HEIF structure:",
+    ]
+    .iter()
+    .any(|pre| p.starts_with(pre))
+}
+
+fn join_problems(ps: &[&String]) -> String {
+    let mut t = ps
+        .iter()
+        .take(8)
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join("; ");
+    if ps.len() > 8 {
+        t.push_str(&format!("; and {} more", ps.len() - 8));
+    }
+    t
 }
 
 #[cfg(test)]

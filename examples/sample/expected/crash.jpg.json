@@ -1,11 +1,11 @@
 {
+  "coefficients": "error",
   "file": "crash.jpg",
   "format": "jpeg",
-  "width": 0,
   "height": 0,
   "signals": [
-    "METADATA_PROBLEMS"
+    "FILE_STRUCTURE_DAMAGED"
   ],
-  "coefficients": "error",
-  "thumbnail": false
+  "thumbnail": false,
+  "width": 0
 }

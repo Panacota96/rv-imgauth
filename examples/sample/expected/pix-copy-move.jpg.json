@@ -4,7 +4,10 @@
     "NOISE_INCONSISTENCY_MAP",
     "QT_STANDARD_IJG"
   ],
+  "coefficients": "ok",
   "file": "pix-copy-move.jpg",
+  "format": "jpeg",
+  "height": 768,
   "maps": [
     "copymove.png",
     "ghost-q60.png",
@@ -13,5 +16,10 @@
     "ghost-q90.png",
     "noise-sigma.png",
     "noise.png"
-  ]
+  ],
+  "signals": [
+    "METADATA_STRIPPED"
+  ],
+  "thumbnail": false,
+  "width": 1024
 }

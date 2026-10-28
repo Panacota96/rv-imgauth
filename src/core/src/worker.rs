@@ -856,13 +856,8 @@ mod tests {
             reply.analysis.detected_type.as_deref(),
             Some("PDF document")
         );
-        assert!(
-            reply
-                .analysis
-                .findings
-                .iter()
-                .any(|f| f.code == "ANALYSIS_NOT_IMPLEMENTED")
-        );
+        // No image signature: only the inventory findings are kept, and the reason is recorded.
+        assert_eq!(reply.analysis.details["image_analysis"], "not_an_image");
         let (mut out, mut err) = (Vec::new(), Vec::new());
         assert_eq!(
             run_child(&["--bogus".into()], &mut &GO[..], &mut out, &mut err),

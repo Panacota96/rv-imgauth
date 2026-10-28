@@ -1,11 +1,11 @@
 {
+  "coefficients": "ok",
   "file": "no-metadata.jpg",
   "format": "jpeg",
-  "width": 800,
   "height": 600,
   "signals": [
     "METADATA_STRIPPED"
   ],
-  "coefficients": "ok",
-  "thumbnail": false
+  "thumbnail": false,
+  "width": 800
 }

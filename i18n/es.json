@@ -263,6 +263,11 @@
       "shows": "Los metadatos no se pudieron leer por completo: %{problems}.",
       "does_not_prove": "Errores de software y ediciones a nivel de bytes dañan los metadatos; no muestra cuál ocurrió."
     },
+    "FILE_STRUCTURE_DAMAGED": {
+      "title": "Estructura del archivo dañada o truncada",
+      "shows": "La estructura propia del archivo está dañada: %{problems}. Todas las partes legibles se examinaron igualmente.",
+      "does_not_prove": "Copias o descargas interrumpidas, almacenamiento defectuoso y ediciones a nivel de bytes dañan un archivo; no muestra cuál ocurrió, ni que el contenido de la imagen se haya cambiado."
+    },
     "THUMBNAIL_MISMATCH": {
       "title": "La miniatura incrustada difiere de la imagen",
       "shows": "La vista previa guardada en el archivo difiere de la imagen principal (%{difference}). La imagen de diferencias está en maps/thumbnail-diff.png.",

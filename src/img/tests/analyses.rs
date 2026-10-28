@@ -94,15 +94,24 @@ fn pix_samples_match_expected_and_ground_truth() {
     for f in &files {
         let r = analyse(&std::fs::read(ev.join(f)).unwrap());
         eprintln!("{f}: {:?}", r.signals);
-        let json = serde_json::json!({ "file": f, "analysis_signals": r.codes, "maps": r.maps });
+        // One expected file per sample, shared with tests/parsers.rs: this test owns only these two keys.
         let path = ex.join(format!("{f}.json"));
+        let mut want: serde_json::Value = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_else(|| serde_json::json!({ "file": f }));
         if bless {
+            want["analysis_signals"] = serde_json::json!(r.codes);
+            want["maps"] = serde_json::json!(r.maps);
             std::fs::create_dir_all(&ex).unwrap();
-            std::fs::write(&path, serde_json::to_string_pretty(&json).unwrap() + "\n").unwrap();
+            std::fs::write(&path, serde_json::to_string_pretty(&want).unwrap() + "\n").unwrap();
         }
-        let want: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(json, want, "{f}");
+        assert_eq!(
+            serde_json::json!(r.codes),
+            want["analysis_signals"],
+            "{f} analysis signals"
+        );
+        assert_eq!(serde_json::json!(r.maps), want["maps"], "{f} maps");
 
         let has = |c: &str| r.codes.iter().any(|x| x == c);
         let manip = [

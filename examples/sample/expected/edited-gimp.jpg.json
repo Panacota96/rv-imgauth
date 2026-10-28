@@ -1,13 +1,13 @@
 {
+  "coefficients": "ok",
   "file": "edited-gimp.jpg",
   "format": "jpeg",
-  "width": 1200,
   "height": 900,
   "signals": [
     "EXIF_SOFTWARE_EDITOR",
     "METADATA_DATES_INCONSISTENT",
     "XMP_EDIT_HISTORY"
   ],
-  "coefficients": "ok",
-  "thumbnail": true
+  "thumbnail": true,
+  "width": 1200
 }

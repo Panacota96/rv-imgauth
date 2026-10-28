@@ -45,8 +45,28 @@ fn codes(p: &ParsedImage) -> Vec<String> {
 
 #[test]
 fn samples_match_expected() {
-    for (file, data, exp) in samples() {
+    let bless = std::env::var_os("RV_BLESS").is_some();
+    for (file, data, mut exp) in samples() {
         let p = parse(&data).unwrap_or_else(|e| panic!("{file}: {e}"));
+        if bless {
+            // One expected file per sample, shared with tests/analyses.rs: this test owns only its own keys.
+            exp["format"] = p.format.name().into();
+            exp["width"] = p.width.into();
+            exp["height"] = p.height.into();
+            exp["signals"] = serde_json::json!(codes(&p));
+            exp["coefficients"] = match decode_coefficients(&data) {
+                Ok(_) => "ok",
+                Err(e) if e.starts_with("unsupported") => "unsupported",
+                Err(_) => "error",
+            }
+            .into();
+            exp["thumbnail"] = p.thumbnail.is_some().into();
+            let path = root().join("examples/sample/expected").join(format!(
+                "{}.json",
+                Path::new(&file).file_name().unwrap().to_string_lossy()
+            ));
+            std::fs::write(&path, serde_json::to_string_pretty(&exp).unwrap() + "\n").unwrap();
+        }
         assert_eq!(p.format.name(), exp["format"], "{file} format");
         assert_eq!(
             p.width as u64,

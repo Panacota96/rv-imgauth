@@ -1,11 +1,11 @@
 {
+  "coefficients": "unsupported",
   "file": "photo.webp",
   "format": "webp",
-  "width": 640,
   "height": 480,
   "signals": [
     "WEBP_FLAGS_MISMATCH"
   ],
-  "coefficients": "unsupported",
-  "thumbnail": false
+  "thumbnail": false,
+  "width": 640
 }

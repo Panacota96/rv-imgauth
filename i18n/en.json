@@ -263,6 +263,11 @@
       "shows": "The metadata could not be read completely: %{problems}.",
       "does_not_prove": "Software bugs and byte-level edits both damage metadata; it does not show which one happened."
     },
+    "FILE_STRUCTURE_DAMAGED": {
+      "title": "Damaged or truncated file structure",
+      "shows": "The file's own structure is damaged: %{problems}. Every readable part was still examined.",
+      "does_not_prove": "Interrupted copies or downloads, faulty storage and byte-level edits all damage a file; it does not show which one happened, nor that the image content was changed."
+    },
     "THUMBNAIL_MISMATCH": {
       "title": "Embedded thumbnail differs from the image",
       "shows": "The small preview stored in the file differs from the main image (%{difference}). A difference image is in maps/thumbnail-diff.png.",

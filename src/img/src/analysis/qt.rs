@@ -295,8 +295,3 @@ mod tests {
         assert_eq!(fingerprint(&j).unwrap().ijg_quality, Some(60));
     }
 }
-
-/// QT_STANDARD_IJG {quality} or QT_NON_STANDARD {nearest, distance}.
-pub fn signals(_fp: &QtFingerprint) -> Vec<crate::model::Signal> {
-    vec![]
-}

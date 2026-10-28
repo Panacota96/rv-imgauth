@@ -1,13 +1,13 @@
 {
+  "coefficients": "unsupported",
   "file": "bad-order.png",
   "format": "png",
-  "width": 320,
   "height": 240,
   "signals": [
     "DATA_AFTER_END_MARKER",
     "PNG_CHUNK_ORDER_INVALID",
     "PNG_PRIVATE_CHUNKS"
   ],
-  "coefficients": "unsupported",
-  "thumbnail": false
+  "thumbnail": false,
+  "width": 320
 }
