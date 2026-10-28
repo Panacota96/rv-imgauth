@@ -2,9 +2,9 @@
 
 rv-imgauth can work alone (`--out DIR`). In a real engagement the Rakvor tools share **one case folder**
 (`--case-dir`): rv-hashinv, the **intake** tool, registers each evidence file once and gives it an evidence id
-(`E0001`, `E0002`, …). rv-imgauth is an **analysis** tool: before it analyses a PDF it re-hashes the file, compares
+(`E0001`, `E0002`, …). rv-imgauth is an **analysis** tool: before it analyses an image it re-hashes the file, compares
 it with that registry and links its own audit chain to the case. A reviewer can then follow one item from intake to
-the last PDF report and check that the file examined is bit-identical to the one registered.
+the last image report and check that the file examined is bit-identical to the one registered.
 
 ```mermaid
 flowchart LR
@@ -12,7 +12,7 @@ flowchart LR
     H --> R[["evidence/registry.json<br/>E0001…: path, size, hashes"]]
     H --> CL[["case-log.jsonl<br/>hash-chained"]]
     R --> P["rv-imgauth (analysis)<br/>--case-dir CASE"]
-    P -->|re-hash + compare<br/>before the PDF analysis| R
+    P -->|re-hash + compare<br/>before the image analysis| R
     P --> CL
     H --> RH["runs/rv-hashinv/RUN-ID/"]
     P --> RP["runs/rv-imgauth/RUN-ID/"]
@@ -33,9 +33,10 @@ The contract (`rakvor.case/1`: schemas, events, rules) is shared by every Rakvor
                                "registered_by":{"tool","version","run_id","audit_seq"},"registered_utc"}]}
   evidence/registry.csv       evidence_id,path,size,<algorithms>,run_id
   runs/rv-hashinv/<RUN-ID>/   the intake runs
-  runs/rv-imgauth/<RUN-ID>/logs/     audit.jsonl, audit.log, hashes.csv, environment.json, timestamp-*.tsr|.json
+  runs/rv-imgauth/<RUN-ID>/logs/     audit.jsonl, audit.log, hashes.csv, environment.json, timestamp-*.tsr|.json,
+                                     review.jsonl (maps viewed after the run, anchored to run_finished)
   runs/rv-imgauth/<RUN-ID>/reports/  statistics.*, items/<NNNNN>-<NAME>/{technical,summary,custody}.*,
-                                     revisions/, visual/, objects.json, embedded/
+                                     structure.json, metadata.json, maps/original.png, maps/*.png
 ```
 
 rv-imgauth **reads** the registry and **never writes** it. JSON schemas:
@@ -50,7 +51,7 @@ rv-hashinv scan -i D:\evidence -r --case-dir E:\CASE-014 --case CASE-014 --juris
 rv-imgauth analyze --case-dir E:\CASE-014
 #    ... or only some registered items, or files given by path (matched against the registry)
 rv-imgauth analyze --case-dir E:\CASE-014 --evidence E0001,E0002
-rv-imgauth analyze --case-dir E:\CASE-014 -i D:\evidence\contract.pdf
+rv-imgauth analyze --case-dir E:\CASE-014 -i D:\evidence\IMG_0042.jpg
 # 3. Check the whole case before handing it over (either tool; they agree)
 rv-imgauth verify-case E:\CASE-014
 ```
@@ -58,7 +59,7 @@ rv-imgauth verify-case E:\CASE-014
 In the GUI, fill **Case folder** in section 1. The output folder is then derived
 (`<case>/runs/rv-imgauth/<RUN-ID>`) and locked, the change is audited (`ui_case_dir_changed`), the result panel
 lists the evidence id and registry check of every item, the results table shows the evidence id next to the file
-name, and the **revision viewer header** shows `#N  E000N  file.pdf` with the registry check (green verified, red
+name, and the **image viewer header** shows `#N  E000N  IMG_0042.jpg` with the registry check (green verified, red
 mismatch, amber not in the registry).
 
 | Option | Meaning |
@@ -89,9 +90,9 @@ sequenceDiagram
     H-->>P: progress lines, run id, exit code
     alt exit code 0 or 3
         P->>C: audit.jsonl starts with intake_delegated (path, version, SHA-256, arguments, run id, exit code)
-        P->>C: re-hash each PDF, compare with the registry, analyse
+        P->>C: re-hash each image, compare with the registry, analyse
     else any other exit code, or cancelled
-        P-->>U: error; nothing is analysed
+        P-->>U: error, nothing is analysed
     end
 ```
 
@@ -108,7 +109,7 @@ rv-imgauth analyze -i D:\evidence -r --case-dir E:\CASE-014 --case CASE-014 --ju
 | Exit codes 0 and 3 (finished, anomalies to look at) continue; any other code, a crash or cancelling stops the run before any analysis. | The registry must be complete before items are verified against it. |
 | Not with `--evidence` (the items are new), and `--input` or `--input-list` is required. | — |
 
-The case then holds two runs, `runs/rv-hashinv/<RUN-ID>/` (hash inventory) and `runs/rv-imgauth/<RUN-ID>/` (PDF
+The case then holds two runs, `runs/rv-hashinv/<RUN-ID>/` (hash inventory) and `runs/rv-imgauth/<RUN-ID>/` (image
 analysis); `verify-case` in either tool checks both. In the GUI, **Open hash report** opens rv-hashinv's statistics
 report.
 
@@ -141,7 +142,7 @@ The registry comparison happens **before** `analysis_started`, so the audit log 
 | Registered path (or `--evidence` id), different content | `evidence_verified_against_case` (match: false, expected, actual) | `EVIDENCE_HASH_MISMATCH_WITH_CASE` (**high**, exit 3) | evidence id, "MISMATCH" |
 | Not in the registry (path and content unknown) | `evidence_not_in_case_registry` | `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium) | "Not in the case registry" |
 
-On a mismatch the PDF analysis **still runs**: the examiner decides what the difference means, and the report shows
+On a mismatch the image analysis **still runs**: the examiner decides what the difference means, and the report shows
 both digests.
 
 **Hash algorithms.** A case run always includes at least one algorithm present in every registered item. If the
@@ -157,7 +158,7 @@ and the intake date (`registered_utc`) from the registry, and the case's jurisdi
 ## Windows: paths are matched without regard to case
 
 The registry stores the absolute, lexically normalised path the intake tool saw. On Windows the file system is
-case-insensitive, so `E:\Evidence\Contract.PDF` and `e:\evidence\contract.pdf` are the same file; rv-imgauth
+case-insensitive, so `E:\Evidence\IMG_0042.JPG` and `e:\evidence\img_0042.jpg` are the same file; rv-imgauth
 therefore compares registry paths **case-insensitively on Windows** (`case::same_path`, `to_lowercase` under
 `cfg(windows)` only) and exactly elsewhere. The stored spelling is never changed. Without this rule a file given
 with a different case would fall back to content matching (still verified when identical, but a modified file would
@@ -170,7 +171,7 @@ be reported as "not in the registry" instead of as a mismatch with its registere
   folder, no case-log entry).
 - **One writer at a time.** Appends happen under `case-log.lock` (created exclusively). A tool waits up to 30 s for
   another one (then exit 1); a lock older than 10 minutes is reported as *stale* with its owner and is **never
-  deleted automatically** — a person decides. The lock is not held during the PDF analysis.
+  deleted automatically** — a person decides. The lock is not held during the image analysis.
 - **`run_finished` is always written**, also after a cancel or a failure, with the final audit head read back from
   disk.
 - **The two chains vouch for each other.** `case_linked.case_log_head_at_start` is the hash of the run's
@@ -183,7 +184,7 @@ be reported as "not in the registry" instead of as a mismatch with its registere
 | --- | --- |
 | 1 | lock held by another tool (after 30 s) or stale lock; file-system error; `verify-case` on a folder without `case.json` |
 | 2 | `case.json` of another schema, case id mismatch, `--case` missing when creating, unknown or malformed evidence id, `--evidence` without `--case-dir` |
-| 3 | the case folder fails verification (nothing written); or the run completed with a high finding (e.g. `EVIDENCE_HASH_MISMATCH_WITH_CASE`, or a PDF finding) |
+| 3 | the case folder fails verification (nothing written); or the run completed with a high finding (e.g. `EVIDENCE_HASH_MISMATCH_WITH_CASE`, or a high image finding such as `COPY_MOVE_CANDIDATE`) |
 
 ## How a reviewer verifies a case
 
@@ -198,11 +199,15 @@ flowchart TB
     E -- no --> X
     E -- yes --> F{"case_linked → run_started<br/>and run_finished → final audit entry?"}
     F -- no --> X
-    F -- yes --> OK["OK (exit 0)<br/>warnings: runs without run_finished"]
+    F -- yes --> G{"review.jsonl (if any)<br/>intact, anchored to run_finished?"}
+    G -- no --> X
+    G -- yes --> OK["OK (exit 0)<br/>warnings: runs without run_finished"]
 ```
 
-1. `rv-imgauth verify-case <CASE>` (rv-hashinv has the same command; they agree). Exit 0 = intact, 3 = broken,
-   1 = not a case folder. Only `timestamp_obtained` may follow a run's recorded final entry (a delayed timestamp).
+1. `rv-imgauth verify-case <CASE>` (rv-hashinv has the same command; they agree on the case log and the runs).
+   Exit 0 = intact, 3 = broken, 1 = not a case folder. Only `timestamp_obtained` may follow a run's recorded final
+   entry (a delayed timestamp). Viewing after the run is never appended to the run's audit log: it goes to the run's
+   `review.jsonl`, which `verify-case` checks when present ("review entries: N").
 2. Independently of any Rakvor binary: `python tests/verify_chain.py <CASE>/runs/<tool>/<RUN-ID>/logs` re-checks a
    run; the case log uses the same chain rule, and `sha256sum evidence/registry.json` must equal the last
    `registry_sha256` in `case-log.jsonl`.

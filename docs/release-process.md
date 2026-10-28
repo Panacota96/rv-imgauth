@@ -10,7 +10,7 @@ flowchart LR
     RP -->|you merge the PR| T["Tag vX.Y.Z +<br/>GitHub release with changelog"]
     T --> W["Windows job (windows-latest)"]
     subgraph W2["Windows job"]
-      B["cargo build --release<br/>CLI + GUI"] --> P["pdfium.dll<br/>(pinned, SHA-256)"] --> S1["signtool: sign + verify<br/>both .exe"] --> V["self-test +<br/>sample run"] --> Z["portable zip"] --> I["Inno Setup<br/>installer"] --> S2["signtool: sign + verify<br/>installer"] --> X["SBOM · SHA256SUMS ·<br/>provenance attestation"]
+      B["cargo build --release<br/>CLI + GUI"] --> S1["signtool: sign + verify<br/>both .exe"] --> V["self-test +<br/>sample run"] --> Z["portable zip"] --> I["Inno Setup<br/>installer"] --> S2["signtool: sign + verify<br/>installer"] --> X["SBOM · SHA256SUMS ·<br/>provenance attestation"]
     end
     W --> W2 --> U["Files attached to the release"]
 ```
@@ -76,11 +76,10 @@ files on that release (`gh release upload --clobber`). The tag and changelog sta
 | --- | --- | --- |
 | Toolchain | Rust version read from `rust-toolchain.toml` | — |
 | Build | `cargo build --release --locked -p rv-imgauth-cli -p rv-imgauth-gui` | compile error or lockfile out of date |
-| PDFium | `scripts\fetch_pdfium.ps1 -Platform win-x64` (tag + SHA-256 pinned in `third_party/pdfium/PDFIUM_VERSION.txt`) | download hash differs |
 | Sign executables | `signtool sign /f sign.pfx /p *** /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 rv-imgauth.exe rv-imgauth-gui.exe` | bad certificate or password |
 | Verify signatures | root imported on the runner, `signtool verify /pa /tw` | signature does not chain to the Rakvor root |
 | Self-test | `rv-imgauth.exe self-test` + `examples\sample\run.ps1` | wrong hashes or sample results |
-| Portable zip | executables + `pdfium.dll` + README, LICENSE, NOTICE, CHANGELOG, licences, docs, examples | — |
+| Portable zip | executables + README, LICENSE, NOTICE, CHANGELOG, docs, examples | — |
 | Installer | `ISCC.exe /DAppVersion=X.Y.Z /DSourceDir=. /Odist packaging\windows\installer.iss` | Inno Setup script error |
 | Sign + verify installer | same signtool commands on `dist\*-setup.exe` | as above |
 | SBOM | `cargo cyclonedx --format json` → `sbom.cdx.json` | — |
@@ -89,7 +88,6 @@ files on that release (`gh release upload --clobber`). The tag and changelog sta
 | Upload | `gh release upload vX.Y.Z … --clobber` (or a workflow artifact for test packages) | — |
 
 Signing happens **before** zipping and hashing, so the hashes in `SHA256SUMS` are those of the signed files.
-`pdfium.dll` is a third-party binary and is not re-signed; it is checked by its SHA-256.
 
 ## 5. The signing certificate
 
@@ -148,8 +146,6 @@ and the signing PFX.
 git clone https://github.com/Panacota96/rv-imgauth; cd rv-imgauth
 git checkout vX.Y.Z                                   # the release you are packaging
 cargo build --release --locked -p rv-imgauth-cli -p rv-imgauth-gui
-.\scripts\fetch_pdfium.ps1 -Platform win-x64
-Copy-Item third_party\pdfium\win-x64\pdfium.dll target\release\
 
 $signtool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
 & $signtool sign /f C:\secure\sign.pfx /p (Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlainText) `

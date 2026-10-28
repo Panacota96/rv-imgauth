@@ -1,115 +1,166 @@
 # Reports
 
-Every run produces one **statistics report**. Every reviewed file produces **two separate reviews**:
-a hyper-detailed **technical review** for examiners and lawyers, and a concise **customer summary** in plain
-language. Each exists as JSON (machine-readable, language-neutral) plus HTML and PDF in each selected language.
+Every run produces one **statistics report**. Every examined file produces a **technical review** for examiners,
+lawyers and opposing experts, a plain-language **customer summary**, and a **chain-of-custody form**. Each exists as
+JSON (language-neutral) plus HTML and PDF in each selected language (`--lang en|es|fr|all`). Image items also get
+the derived files listed in [Per-item outputs](#per-item-outputs).
 
 ```mermaid
 flowchart TB
     RUN["Run"] --> S["statistics.json<br/>statistics.LANG.html · .pdf"]
-    RUN --> I1["items/00001-broken-xref.pdf/"]
-    RUN --> I2["items/00002-…/"]
+    RUN --> I1["items/00008-pix-copy-move.jpg/"]
+    RUN --> I2["items/00009-…/"]
     I1 --> T1["technical.json<br/>technical.LANG.html · .pdf"]
     I1 --> C1["summary.json<br/>summary.LANG.html · .pdf"]
     I1 --> K1["custody.json<br/>custody.es|fr + custody.en .html · .pdf"]
+    I1 --> D1["structure.json · metadata.json"]
+    I1 --> M1["maps/original.png · ela.png · noise.png<br/>noise-sigma.png · ghost-qNN.png<br/>copymove.png · thumbnail-diff.png"]
 ```
 
-Each item folder also holds a **chain-of-custody form** for the chosen jurisdiction (`--jurisdiction co|fr`)
-plus its English version — see [forensic-audit.md](forensic-audit.md#chain-of-custody-form-per-item).
+**Brand.** HTML and PDF reports carry the Rakvor header band (RV mark, *FORENSICS | INCIDENT RESPONSE | SECURITY*,
+tagline in the report language). With `--sign-cert` each PDF is digitally signed and shows the signer; otherwise it
+says "This PDF is not digitally signed". Every report file's digest is recorded in the audit log
+(`item_reports_written`, `statistics_report_written`).
 
-**Brand.** HTML and PDF reports carry the Rakvor header band (RV mark, descriptor
-*FORENSICS | INCIDENT RESPONSE | SECURITY* and the tagline in the report language) on a light, printable page.
-When `--sign-cert` is used, each PDF shows the signer and certificate fingerprint and carries a digital signature
-that Acrobat or `pyhanko sign validate` can check. The statistics report shows the trusted timestamp (or a warning
-that it is pending).
+## Technical review vs customer summary
 
-**Size.** Item reports never list every other file: duplicate partners are capped at 10 names
-("… (+N)"); the complete groups are in the statistics report and `hashes.csv`.
+| | Technical review | Customer summary |
+| --- | --- | --- |
+| Reader | Examiner, lawyer, opposing expert | Client |
+| Findings | Code, severity, parameters, **what it shows / what it does not prove** | Title and plain sentence |
+| Image details | Every section below, with parameters and digests | "What the checks looked at": format, size, camera and software named in the metadata, capture date, number of maps, reference comparison counts ("8 properties consistent, 4 inconsistent. This neither proves nor excludes that device.") |
+| Hashes | All digests | Primary digest ("Digital fingerprint") |
+| Method, audit entries, limitations | Yes | "What we did"; "Recommended next step" |
 
-## What each report contains
+## Statistics report sections
 
-| Section | Statistics | Technical review | Customer summary |
-| --- | :-: | :-: | :-: |
-| Run ID, case, examiner, start/end, duration, interface | ✔ | ✔ (run ID, case) | case, date |
-| Hash algorithms, totals, throughput | ✔ | | |
-| Findings by severity and type, items by detected type | ✔ | | |
-| Duplicate groups | ✔ | as finding | as finding |
-| Full path, size, modified time, extension, detected type | | ✔ | file name |
-| All digests | | ✔ | primary only ("digital fingerprint") |
-| Findings with **what it shows / what it does not prove** | | ✔ | plain sentence |
-| Method | | ✔ | "What we did" |
-| Audit entries covering the item | | ✔ (`#first – #last`) | |
-| Limitations | ✔ | ✔ | |
-| Status and next step | | ✔ | ✔ |
-| PDF overview: PDFs with >1 revision, with signatures, with online-editor fingerprints | ✔ | | |
-| Revision history table (byte range, Info/XMP dates, producer, time since previous, objects added/changed/deleted, pages changed, signed by) + timeline | | ✔ | |
-| Signatures, fonts, producer fingerprints (DB name, version, SHA-256), visual comparison (thumbnails → PNG), extracted files with digests | | ✔ | |
-| Plain-language document history ("saved 3 times; last change 9 days after creation, with an online editor") | | | ✔ |
+| Section | Content |
+| --- | --- |
+| Header | Run ID, case, examiner, interface, start/end, duration, hash algorithms, totals, throughput |
+| Findings by severity / by type | Counts per severity and per code |
+| Items by detected type | JPEG, PNG, WebP, HEIF, other |
+| Duplicate groups | Identical files (same primary digest) |
+| Image overview | Images examined, analyses not completed, items without report files (`--item-reports flagged`), and the item table (file, size, status, number of findings) |
+| Case folder | With `--case-dir`: verified / mismatch / not registered counts |
+| Limitations | The run's limitations |
+| Trusted timestamp (RFC 3161) | Time and TSA, or a pending / disabled notice |
+| Audit trail | Chain head and entry count at the time of writing |
+
+## Technical review sections
+
+In this order (HTML and PDF; the JSON holds the same data under `image`):
+
+| Section | Content | Source in `technical.json` |
+| --- | --- | --- |
+| Identification, hashes | Path, size, modified time, extension, detected type, evidence id and registry check, every digest | `item`, `hashes` |
+| Findings | Severity, code, title, what it shows, what it does not prove, parameters | `findings` |
+| Image analysis | Format, size, analysis status, evidence re-hash (first and second pass), worker outcome (time, memory limit, network isolation), options used | `image.format`, `image.evidence_rehash`, `image.worker`, `image.options` |
+| Original image (decoded preview) | The preview `maps/original.png` (PDF: a copy at most 480 px long; the hashed file is full size) and its parameters (decoder, stored orientation) | `image.original_preview` |
+| Metadata summary | Key fields (Make, Model, Software, dates, offsets, PixelX/Y, Orientation, CreatorTool, IPTC, PNG text…), tag counts per group, GPS tag count, MakerNote, ICC hash, XMP presence, thumbnail presence, problems | `image.metadata_summary` |
+| XMP edit history | `xmpMM:History` events: action, when, software agent, changed | `image.metadata_summary.xmp_history` |
+| Structure summary | Segment / chunk / box sequence (repeats collapsed as `IDAT ×5`) and facts (frame type, subsampling, components, restart interval, table counts, bytes after EOI/IEND, VP8X flags, HEIF brands, items, grid, unreferenced bytes) | `image.structure_summary` |
+| Quantization tables | Each table in natural order (8×8) with precision and the components using it; table SHA-256; IJG quality or nearest q and distance | `image.qt_fingerprint` |
+| Fingerprint databases | Each database loaded (role starter / local / extra, name, version, SHA-256, entries, status) and the matches | `image.fingerprint_dbs`, `image.qt_fingerprint.matches` |
+| Analysis maps | One block per map: title, file, digest, picture (PDF: print copy) and **every recorded parameter** | `image.maps`, `image.map_parameters` |
+| Copy-move shift vectors | Shifts and block counts of the candidates, or none | findings `COPY_MOVE_CANDIDATE` |
+| Comparison with reference images | References (path, SHA-256, status) and the per-property table: property, status (consistent / inconsistent / varies / not applicable), item value, reference value, value per reference | `image.references`, `image.reference_table` |
+| Extracted files | Every derived file of the item: path, kind, size, digests | `extracted_files` |
+| Method | What was done, in the report language | — |
+| Audit trail | Audit entries covering the item (`#first – #last`), chain head | `audit` |
+| Limitations | The six image limitations plus item-specific ones | `limitations` |
+
+## Per-item outputs
+
+All are written into the item folder by the worker, then hashed with the run's algorithms and recorded as
+`output_written` (kind in brackets). A file is never overwritten.
+
+| File | Kind | Content |
+| --- | --- | --- |
+| `structure.json` | `structure` | `format`, `width`, `height`, the full `structure` tree (every marker segment, chunk or box with `kind`, `offset`, `length`, `detail`, children), and the per-format info: `jpeg` (markers, SOF, components, subsampling, quantization and Huffman tables, restart interval, comments, bytes after EOI), `png` (chunks, bit depth, colour type, bytes after IEND), `webp` (kind, lossless, VP8X flags, chunks), `heif` (brands, primary item, items with type, extents and properties, grid, unreferenced bytes) |
+| `metadata.json` | `metadata` | Every tag read (`group`, `name`, `value`): EXIF IFD0/Exif/GPS/IFD1, XMP, IPTC, PNG text and `tIME`, JPEG comments; MakerNote presence, ICC SHA-256, the XMP packet, `xmp_history`, reading problems |
+| `maps/original.png` | `original_preview` | Lossless RGB8 PNG of exactly the pixels every analysis saw (stored orientation, alpha over white). Not written for HEIC, undecodable files or images above `--max-pixels` |
+| `maps/ela.png` | `map` | Error level map (JPEG, `--maps ela`) |
+| `maps/noise.png`, `maps/noise-sigma.png` | `map` | Median residual (full size) and σ per 40×40 HH1 block (half size) (`--maps noise`) |
+| `maps/ghost-q50.png` … `ghost-q90.png` | `map` | JPEG ghost maps (JPEG ≤ 24 MP, `--maps ghosts`) |
+| `maps/copymove.png` | `map` | Copy-move overlay, only when a candidate is found |
+| `maps/thumbnail-diff.png` | `map` | Thumbnail vs resized main image difference, when the thumbnail decodes |
+
+Parameters of each map (e.g. ELA `quality`, `gain`, `encoder`, `decoder`, `sampling`, `scaling`) are in
+`technical.json` → `image.maps[].params` and printed under the map. Why each map looks the way it does:
+[theory.md](theory.md#part-b--for-examiners-and-opposing-experts).
 
 With `--item-reports flagged`, items whose status is `ok` get no technical, summary or custody files; their
-derived outputs (e.g. `objects.json`) are still written and audited. They stay listed in the statistics report
-(`reports_written: false`) and the audit log records `item_reports_skipped`.
+derived outputs are still written and audited, they stay listed in the statistics report, and the audit log records
+`item_reports_skipped`.
 
 ## Status and severity
 
-```mermaid
-pie showData
-    title Example run: findings by severity
-    "High" : 1
-    "Medium" : 3
-    "Informational" : 6
-```
-
-| Severity | Examples | Item status |
+| Item status | Rule | Customer wording |
 | --- | --- | --- |
-| High | CONTENT_CHANGED_AFTER_SIGNATURE, SIGNATURE_INTEGRITY_FAILED, PARSER_FAILED, UNREADABLE | `problem` (exit code 3) |
-| Medium | VISUAL_CHANGE_BETWEEN_REVISIONS, METADATA_INFO_XMP_MISMATCH, EXTENSION_MISMATCH | `attention` |
-| Low | INCREMENTAL_UPDATES, HYBRID_XREF, EMBEDDED_FILES | `attention` |
-| Informational | REVISION_TIME_GAP, SIGNATURE_PRESENT_TRUST_NOT_VERIFIED, DUPLICATE | `ok` |
+| `problem` | at least one **high** finding | "Problem found" — do not rely on this file until the examiner has explained it |
+| `attention` | at least one **medium** or **low** finding | "Needs attention" |
+| `ok` | only **info** findings or none | "No issues found" (with the limitation that this is not proof of authenticity) |
 
-## Findings catalogue
+The run exits with code 3 when any item has a high finding. On the sample run (15 images, every map, two
+references): high 1, medium 23, low 8, info 48.
 
-Every code, its severity, and the rule behind it. The full *shows / does not prove* wording is in
-`i18n/en.json` (es, fr); what to check next and what not to conclude: [usage.md](usage.md#5-interpreting-each-finding);
-the exact rules and thresholds: [theory.md](theory.md).
+Severity rule of the catalogue: visual maps and analyses not run are **info**; editor, software and structure
+traces and inconsistencies are **medium**; common traces of ordinary sharing are **low**; copy-move candidates, a
+thumbnail showing different content, failed analyses and evidence integrity problems are **high**.
 
-| Code | Severity | Raised when |
-| --- | :-: | --- |
-| `EMPTY_FILE` | info | the file has 0 bytes |
-| `EXTENSION_MISMATCH` | medium | name and content signature disagree |
-| `EXECUTABLE_CONTENT` | high | a program is stored under a non-program name |
-| `DUPLICATE` | info | identical content (primary hash) in several files |
-| `UNREADABLE` | high | reading failed (OS error) |
-| `NOT_A_PDF` | info | a `.pdf` name without `%PDF-` in the first 1024 bytes |
-| `PARSER_FAILED` | high | the isolated PDF analysis did not complete (timeout, memory, crash, bad output) |
-| `EVIDENCE_CHANGED_DURING_ANALYSIS` | high | the bytes the worker parsed (re-hashed) differ from the digest of the hashing pass |
-| `ENCRYPTED_PARTIAL_ANALYSIS` | info | the PDF is encrypted; content checks skipped |
-| `INCREMENTAL_UPDATES` | low | more than one revision |
-| `VISUAL_CHANGE_BETWEEN_REVISIONS` | medium | rendered pages of consecutive revisions differ, or pages were added/removed |
-| `VISUAL_DIFF_SKIPPED` | info | the visual comparison could not run (reason given) |
-| `METADATA_INFO_XMP_MISMATCH` | medium | Info and XMP disagree on producer, creator or dates (final revision) |
-| `MODDATE_BEFORE_CREATIONDATE` | high | a modification date earlier than the creation date (Info or XMP) |
-| `REVISION_TIME_GAP` | info | consecutive revisions dated at least 1 hour apart |
-| `REVISION_DATE_NOT_MONOTONIC` | medium | a revision is dated earlier than the revision before it |
-| `PRODUCER_CHANGED_BETWEEN_REVISIONS` | medium | the Info producer changes between consecutive revisions |
-| `EDITOR_FINGERPRINT` | medium | a revision was saved by a known PDF editor |
-| `ONLINE_EDITOR_OR_UNLOCKER` | high | a revision was saved by an online editor or protection-removal tool |
-| `PRODUCER_STRUCTURE_MISMATCH` | medium | the structure differs from what the declared producer writes |
-| `UNKNOWN_PRODUCER` | info | a producer string not in the databases used |
-| `XREF_OFFSETS_INCONSISTENT` | medium | cross-reference data does not point at its objects, or startxref is wrong |
-| `HYBRID_XREF` | low | a classic xref table plus an `/XRefStm` stream |
-| `DATA_AFTER_FINAL_EOF` | medium | non-whitespace bytes after the last `%%EOF` |
-| `SIGNATURE_INTEGRITY_FAILED` | high | digest mismatch, invalid signature value or a ByteRange not covering exactly one revision |
-| `SIGNATURE_PRESENT_TRUST_NOT_VERIFIED` | info | every signature (trust is never validated) |
-| `CONTENT_CHANGED_AFTER_SIGNATURE` | high | a later revision changes page content or structure |
-| `DOCMDP_VIOLATION` | high | later changes exceed the certification permission level |
-| `JAVASCRIPT_PRESENT` | medium | JavaScript actions or name tree |
-| `LAUNCH_ACTION` | high | a `/Launch` action |
-| `EMBEDDED_FILES` | low | attachments |
-| `INVISIBLE_TEXT` | medium | text drawn invisibly on a page (render mode 3/7, white or transparent fill) |
-| `TEXT_OVER_SCANNED_IMAGE` | medium | a page mostly covered by one image also contains text |
-| `FONT_ADDED_IN_LATER_REVISION` | medium | a font first appears in a later revision and is used by page content |
-| `SCANNED_PAGES_STRUCTURE_ONLY` | info | pages that are a single large image without text |
+## Finding codes
+
+Every code with its severity as emitted by the code of this commit and its title (`i18n/en.json`). The *shows* and
+*does not prove* texts are in the catalogue and in every report, in English, Spanish and French.
+
+| Code | Severity | Title |
+| --- | --- | --- |
+| `EMPTY_FILE` | info | Empty file |
+| `EXTENSION_MISMATCH` | medium | Extension does not match content |
+| `EXECUTABLE_CONTENT` | high | Executable content under another name |
+| `DUPLICATE` | info | Duplicate content |
+| `UNREADABLE` | high | File could not be read |
+| `PARSER_FAILED` | high | Image analysis did not complete |
+| `EVIDENCE_CHANGED_DURING_ANALYSIS` | high | Evidence changed during the analysis |
+| `EVIDENCE_HASH_MISMATCH_WITH_CASE` | high | Differs from the evidence registered in the case |
+| `EVIDENCE_NOT_IN_CASE_REGISTRY` | medium | Not registered in the case |
+| `REGISTRY_PATH_CONTENT_CHANGED` | medium | Registered path now holds different content |
+| `JPEG_MARKER_ORDER_UNUSUAL` | medium | Unusual JPEG segment order |
+| `DUPLICATE_TABLES` | medium | Tables defined twice |
+| `DATA_AFTER_END_MARKER` | medium | Data after the end of the image |
+| `PROGRESSIVE_ENCODING` | low | Progressive JPEG |
+| `PNG_CHUNK_ORDER_INVALID` | medium | PNG chunks out of the required order |
+| `PNG_PRIVATE_CHUNKS` | low | Private PNG chunks |
+| `WEBP_FLAGS_MISMATCH` | medium | WebP header does not match its content |
+| `HEIF_STRUCTURE_ANOMALY` | medium | Unusual HEIC/HEIF structure |
+| `HEIF_UNREFERENCED_DATA` | medium | HEIC/HEIF bytes used by no item |
+| `EXIF_SOFTWARE_EDITOR` | medium | Saved by editing or processing software |
+| `XMP_EDIT_HISTORY` | medium | Edit history in XMP |
+| `METADATA_DATES_INCONSISTENT` | medium | Metadata dates do not agree |
+| `EXIF_DIMENSIONS_MISMATCH` | medium | Recorded size differs from the real size |
+| `METADATA_STRIPPED` | low | Little or no camera metadata |
+| `MESSENGER_TRACES` | low | Traces of a messenger or social network |
+| `MAKERNOTE_MISSING_FOR_MAKE` | low | Manufacturer notes missing |
+| `METADATA_PROBLEMS` | low | Damaged metadata |
+| `FILE_STRUCTURE_DAMAGED` | medium | Damaged or truncated file structure |
+| `THUMBNAIL_MISMATCH` | high | Embedded thumbnail differs from the image |
+| `QT_STANDARD_IJG` | info | Standard (IJG) compression tables |
+| `QT_NON_STANDARD` | info | Non-standard compression tables |
+| `QT_MATCHES_EDITOR` | medium | Compression tables of an editor or app |
+| `QT_MATCHES_DEVICE` | info | Compression tables of a known device |
+| `QT_UNKNOWN` | info | Compression tables not in the database |
+| `QT_INCONSISTENT_WITH_EXIF_MAKE` | medium | Compression tables do not fit the camera named |
+| `DOUBLE_COMPRESSION_SIGNS` | low | Signs of repeated JPEG compression |
+| `JPEG_GHOST_REGION` | medium | Region with a different compression history |
+| `COEFFICIENTS_UNAVAILABLE` | info | Compression analysis not possible |
+| `ELA_MAP_WRITTEN` | info | Error level map written |
+| `ELA_NOT_APPLICABLE` | info | Error level map not applicable |
+| `NOISE_INCONSISTENCY_MAP` | info | Noise maps written |
+| `COPY_MOVE_CANDIDATE` | high | Possible copied-and-moved region |
+| `REFERENCE_INCONSISTENT` | medium | Inconsistent with the reference set |
+| `REFERENCE_CONSISTENT` | info | Consistent with the reference set |
+| `HEIC_PIXELS_NOT_DECODED` | info | HEIC pixels not analysed |
+| `ANALYSIS_SKIPPED_SIZE_CAP` | info | Analysis skipped for size |
 
 Wording lives in `i18n/en.json`, `es.json`, `fr.json` (same keys in all three — enforced by a test).
 
@@ -120,12 +171,13 @@ Wording lives in `i18n/en.json`, `es.json`, `fr.json` (same keys in all three �
 | `statistics.json` | `rakvor.statistics/1` | [schemas/statistics.schema.json](../schemas/statistics.schema.json) |
 | `technical.json` | `rakvor.item-technical/1` | [schemas/item-technical.schema.json](../schemas/item-technical.schema.json) |
 | `summary.json` | `rakvor.item-summary/1` | [schemas/item-summary.schema.json](../schemas/item-summary.schema.json) |
+| `custody.json` | `rakvor.item-custody/1` | [schemas/item-custody.schema.json](../schemas/item-custody.schema.json) |
 
+`python tests/validate_reports.py <reports/RUN-ID>` validates every JSON report (CI does it on the sample run).
 Adding a field is a minor change; removing or renaming one bumps the `/N` version.
 
 ## PDF notes
 
-PDFs are generated by a small built-in writer (A4, Helvetica/Courier, WinAnsi encoding), so no external
-program is needed on the examiner's PC. WinAnsi covers English, Spanish and French; other scripts would
-need an embedded font (upgrade path: Typst). Every report file's digest is recorded in the audit log
-(`item_reports_written`, `statistics_report_written`), so a report altered after the run can be detected.
+PDFs are generated by a built-in writer (A4, Helvetica/Courier, WinAnsi), so nothing external is needed. Maps and
+the preview are embedded as print copies at most 480 px on the long side; the full-resolution PNG next to the report
+is the hashed original.

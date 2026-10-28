@@ -1,51 +1,97 @@
 # Architecture
 
-One engine, two front-ends. The engine (`src/core`) does all the work and never prints; the CLI and
-the GUI only turn user input into a `RunConfig` and render the `Event`s the engine emits. This is why
-both interfaces always produce identical logs and reports.
+One engine, two front-ends. The engine (`src/core`) does all the work and never prints; the CLI and the GUI only
+turn user input into a `RunConfig` and render the `Event`s the engine emits, so both interfaces produce identical
+logs and reports. The image layer (`src/img`) parses and analyses bytes and pixels; it does no I/O and writes
+nothing.
+
+## Crates
 
 ```mermaid
 flowchart TB
     subgraph Front-ends
-        CLI["rv-imgauth (src/cli)<br/>clap · indicatif"]
-        GUI["rv-imgauth-gui (src/gui)<br/>egui · wgpu"]
+        CLI["rv-imgauth-cli → rv-imgauth<br/>(src/cli) clap · indicatif<br/>analyze · fingerprints · verify-log<br/>timestamp · verify-case · self-test"]
+        GUI["rv-imgauth-gui (src/gui)<br/>egui · state.rs (testable rules)<br/>image viewer"]
     end
-    subgraph Core["rv_imgauth_core (src/core)"]
+    subgraph Core["rv-imgauth-core (src/core)"]
         RUN["run.rs<br/>pipeline"]
-        IN["input.rs"]
-        H["hash.rs"]
-        AN["analyzer.rs<br/>(domain logic)"]
-        AU["audit.rs"]
-        REP["report/<br/>JSON · HTML · PDF"]
-        I18N["i18n.rs"]
+        WK["worker.rs<br/>isolation"]
+        IS["imgscan.rs<br/>image item analysis"]
+        FP["fingerprints.rs"]
+        AU["audit.rs · review.rs"]
+        CA["case.rs · intake.rs"]
+        TR["trust.rs<br/>RFC 3161 · CMS"]
+        REP["report/<br/>JSON · HTML · PDF<br/>imgview.rs"]
+    end
+    subgraph Img["rv-imgauth-img (src/img) — forbid(unsafe), no I/O"]
+        MOD["model.rs<br/>FROZEN image model"]
+        PARSE["parse/<br/>jpeg · png · webp · heif · meta · signals"]
+        ANA["analysis/<br/>qt · double · pixels · ela · noise<br/>ghosts · copymove · thumbnail · reference"]
     end
     CLI -- RunConfig --> RUN
-    GUI -- "RunConfig (+ UI actions)" --> RUN
-    RUN -- "Event stream" --> CLI
-    RUN -- "Event stream (mpsc)" --> GUI
-    RUN --> IN & H & AN & AU & REP
-    REP --> I18N
+    GUI -- "RunConfig + UI actions" --> RUN
+    RUN -- events --> CLI & GUI
+    RUN --> WK --> IS
+    IS --> PARSE & ANA
+    PARSE & ANA --> MOD
+    IS --> FP
+    RUN --> AU & CA & TR & REP
+    GUI -- "ui_map_viewed" --> AU
 ```
 
-## Modules
+| Crate / module | Responsibility |
+| --- | --- |
+| `src/img` `parse::jpeg` | JPEG marker parser (T.81), segment tree without gaps, MPF/trailer detection; baseline Huffman decoder to quantized DCT coefficients |
+| `src/img` `parse::png`, `webp`, `heif`, `inflate` | PNG chunk walker (own zlib inflater for text chunks), WebP RIFF walker, HEIF/ISOBMFF box walker with item graph and extents |
+| `src/img` `parse::meta`, `signals` | EXIF (kamadak-exif), XMP (quick-xml) with `xmpMM:History`, IPTC-IIM, PNG text; structure and metadata signals |
+| `src/img` `analysis::*` | Pixel decoding (zune-jpeg, png, image-webp), quantization tables, double compression, ELA, noise maps, JPEG ghosts, copy-move, thumbnail and reference comparison |
+| `src/core` `imgscan.rs` | One item: second read and re-hash, parse, signals → findings, fingerprint lookup, maps written into the item folder, reference comparison |
+| `src/core` `analyzer.rs` | Dispatch: image candidates to `imgscan` (in the worker), other files to inventory findings |
+| `src/core` `worker.rs` | Child-process isolation, limits, reply protocol `rv-imgauth-worker/1`, `PARSER_FAILED` |
+| `src/core` `fingerprints.rs` | Starter, local and extra fingerprint databases; identity (name, version, SHA-256) for the audit |
+| `src/core` `audit.rs`, `review.rs` | Hash-chained `audit.jsonl`; post-run `review.jsonl` anchored to `run_finished`; verification |
+| `src/core` `case.rs`, `intake.rs` | Case folder (`rakvor.case/1`), registry verification, `--intake hashinv` |
+| `src/core` `trust.rs` | RFC 3161 timestamp of the chain head; CMS signing of PDF reports (parent only; the only network code) |
+| `src/core` `report/` | View models → minijinja HTML, built-in PDF writer, schema-versioned JSON; `imgview.rs` turns image details into report sections |
+| `src/core` `run.rs`, `input.rs`, `hash.rs`, `env.rs`, `events.rs` | Orchestration, inputs, hashing, `environment.json`, typed events and ETA |
+| `src/cli` | Commands, long help (also the source of [usage-cli.md](usage-cli.md)), `fingerprints learn/list/export` |
+| `src/gui` | egui window; `state.rs` holds every rule (options, viewer model, audit of views) and is unit-tested; `app.rs` draws |
 
-| Module | Responsibility | Replace when building a new tool? |
-| --- | --- | --- |
-| `input.rs` | Files, folders, list files → sorted, de-duplicated, absolute paths. Symlinks not followed. | No |
-| `hash.rs` | One read loop (1 MiB chunks) feeding 1–2 digests; known-answer self-test. | No |
-| `analyzer.rs` | Dispatch: PDF candidates to the PDF analysis (worker), other files to signature detection and inventory findings. | **Yes — this is the domain logic** |
-| `pdfscan.rs` | In-process PDF analysis of one item: read-only memory map, `rv_imgauth_pdf::analyze`, derived outputs (revisions, `objects.json`, `warnings.json`, `embedded/`); re-hash of the mapped bytes. | PDF-specific |
-| `worker.rs` | Child-process isolation (`<exe> worker`), limits, reply protocol `rv-imgauth-worker/1`, `PARSER_FAILED`. | Reusable for heavy analyzers |
-| `visual.rs` | Visual diff of consecutive revisions with PDFium (`src/render`). | PDF-specific |
-| `fingerprints.rs` | Starter, local and extra producer databases and their identity for the audit trail. | PDF-specific |
-| `trust.rs` | RFC 3161 timestamp of the chain head; CMS signing of PDF reports. | No |
-| `src/pdf` (crate) | PDF parser and findings: scan, revisions, xref, metadata, fonts, content, signatures, DocMDP. `#![forbid(unsafe_code)]`, writes nothing. | PDF-specific |
-| `src/render` (crate) | PDFium binding (run-time load), pixel diff, side-by-side PNG. | PDF-specific |
-| `audit.rs` | Append-only hash-chained `audit.jsonl` + `audit.log`; `verify`. | No |
-| `report/` | View models → minijinja HTML, built-in PDF writer, schema-versioned JSON. | Adapt wording/fields |
-| `events.rs` | Typed events; ETA computation. | No |
-| `env.rs` | `environment.json` (versions, OS, host, user, command line). | No |
-| `run.rs` | Orchestration, cancellation, duplicates, `hashes.csv`. | Small changes |
+## Data flow of one image
+
+```mermaid
+flowchart LR
+    E[("evidence<br/>read-only")] -->|pass 1| H["hash.rs<br/>1–2 digests"]
+    E -->|pass 2 in worker| B["bytes<br/>re-hash = pass 1?"]
+    B --> P["parse()<br/>ParsedImage"]
+    P --> S["structure + metadata<br/>signals"]
+    P --> Q["qt::fingerprint<br/>+ fingerprint DBs"]
+    B --> C["decode_coefficients<br/>(baseline JPEG)"] --> D["double compression"]
+    B --> X["decode_pixels<br/>(JPEG/PNG/WebP ≤ caps)"]
+    X --> M["original.png · ELA · noise<br/>ghosts · copy-move · thumbnail"]
+    P --> R["reference comparison"]
+    S & Q & D & M & R --> F["findings + details<br/>+ outputs list"]
+    F --> W["parent: hash outputs,<br/>output_written, item_analyzed"]
+    W --> REP["reports"]
+```
+
+## The frozen image model
+
+`src/img/src/model.rs` is **frozen**: fields may be added with a default, never renamed or removed. The parsers
+and the analyses were written in parallel against it, and the core depends only on it.
+
+```text
+bytes ──► parse()                ──► ParsedImage { format, width, height, structure: [Segment tree],
+                                                   metadata { tags, xmp, xmp_history, makernote_present,
+                                                   icc_sha256, problems }, jpeg | png | webp | heif info,
+                                                   thumbnail, signals }
+      ──► decode_coefficients()  ──► Vec<ComponentCoefficients>   (baseline JPEG only)
+      ──► decode_pixels()        ──► Pixels (RGB8)                (JPEG/PNG/WebP; never HEIF)
+analyses(ParsedImage, coefficients, pixels) ──► Vec<Signal { code, severity, params }> + Vec<MapImage { name, png, params }>
+```
+
+`Signal`s carry only a code, a severity and parameters; the core maps them to findings and the wording comes from
+`i18n/*.json`. `MapImage`s carry their parameters, which go into the report next to the map.
 
 ## One run, step by step
 
@@ -55,29 +101,68 @@ sequenceDiagram
     participant UI as CLI / GUI
     participant R as run.rs
     participant A as audit.jsonl
-    participant FS as Evidence (read-only)
+    participant W as worker
     participant O as reports/
     UI->>R: run(config, sink, cancel)
-    R->>A: run_started, UI actions, environment_recorded
-    R->>R: collect inputs
-    R->>A: inputs_resolved
-    R-->>UI: RunStarted{total_items,total_bytes}
-    loop each item
-        R->>A: item_started
-        R->>FS: open read-only, read 1 MiB chunks
-        R-->>UI: Progress{elapsed_ms, eta_ms} (≤ every 150 ms)
-        R->>A: item_hashed{digests, mtime_unchanged}
-        R->>A: analysis_started, output_written (one per derived file, PDFs via the worker)
-        R->>A: item_analyzed{findings, status}
-        R-->>UI: ItemFinished
+    R->>A: run_started, UI actions, environment_recorded, inputs_resolved
+    loop each item (sequential)
+        R->>A: item_started, item_hashed{digests, mtime_unchanged}
+        R->>A: case verification (with --case-dir)
+        R->>A: analysis_started
+        R->>W: image candidate → worker
+        W-->>R: findings, details, outputs
+        R->>A: output_written (each file), item_analyzed
     end
     R->>A: duplicate_group(s), hash_register_written
-    R->>O: per-item technical + summary (JSON/HTML/PDF)
-    R->>A: item_reports_written{file digests}
-    R->>A: timestamp_obtained or timestamp_pending (RFC 3161 of the chain head)
-    R->>O: statistics (JSON/HTML/PDF)
+    R->>O: per-item technical, summary, custody
+    R->>A: item_reports_written
+    R->>A: timestamp_obtained / timestamp_pending
+    R->>O: statistics
     R->>A: statistics_report_written, run_finished
     R-->>UI: RunFinished
+    Note over UI,A: later, in the GUI viewer: review.jsonl ← ui_map_viewed (anchored to run_finished)
+```
+
+Items are processed sequentially so that the order of audit entries equals the order of work; inside one image the
+heavy analyses (noise wavelet strips, residual rows, copy-move DCT planes) use `rayon`. Cancellation is checked
+after every hashing chunk and between items; partial reports and `run_cancelled` are written.
+
+## Worker process
+
+```text
+run.rs ──► analyzer::analyze_item ── not an image ──► inventory analysis (in process)
+                    │ image candidate (signature or extension)
+                    ▼
+      worker::analyze_in_worker ── spawn `<exe> worker --in … --item-dir … --opts <json> --expect-digest <algo>:<hex>`
+        limits first (Unix RLIMIT_AS, no core dump, empty network namespace when permitted;
+        Windows Job Object), then "RV-WORKER-GO" on stdin
+                    ▼
+      child: imgscan::analyze_image ─► rv_imgauth_img ─► structure.json, metadata.json, maps/*.png
+                    │ one JSON reply on stdout {"protocol":"rv-imgauth-worker/1","analysis":…}
+                    ▼
+      parent: validate output paths ─► hash + audit each file ─► item_analyzed
+```
+
+Failure (timeout, crash, memory limit, bad reply) → `PARSER_FAILED` (high) and `details.worker`; the run continues.
+Files left by a failed worker are kept as `partial_output` and audited. Details: [theory.md B19](theory.md#b19-worker-isolation).
+
+## The review log
+
+The run's audit chain is closed at `run_finished`. What the examiner looks at **afterwards** (maps opened in the
+GUI viewer) goes into `review.jsonl` in the same log folder: a second hash chain whose first entry quotes the
+`run_finished` hash. `verify-log` and `verify-case` verify it when present. If it cannot be written, the GUI falls
+back to recording the view in the next run's audit log.
+
+```mermaid
+flowchart LR
+    subgraph audit.jsonl
+        A1["#1 run_started"] --> A2["…"] --> AN["#N run_finished<br/>hash H"]
+        AN -.-> AT["timestamp_obtained<br/>(only entry allowed after)"]
+    end
+    subgraph review.jsonl
+        R1["#1 ui_map_viewed<br/>anchor_seq N, anchor_hash H<br/>prev = H"] --> R2["#2 ui_map_viewed<br/>prev = #1"]
+    end
+    AN --> R1
 ```
 
 ## Run states (as the GUI sees them)
@@ -89,53 +174,12 @@ stateDiagram-v2
     Running --> Finished: RunFinished
     Running --> Cancelled: Cancel → partial reports
     Running --> Failed: error (e.g. output not writable)
+    Finished --> Viewer: View image
+    Viewer --> Finished: Back to results
     Finished --> Running: Start again (new run ID)
     Cancelled --> Running
     Failed --> Running
 ```
-
-## Concurrency and cancellation
-
-- The GUI runs the engine on a worker thread and receives events through a channel, so the window stays
-  responsive; the elapsed-time label is refreshed every 200 ms from the window clock.
-- Cancellation is an `AtomicBool` checked after every 1 MiB chunk: large images stop within milliseconds.
-  The engine still writes `hashes.csv`, partial reports and `run_cancelled` to the audit log.
-- Files are processed sequentially on purpose: the order of audit entries equals the order of work, which is
-  easier to explain in court. Hashing is I/O-bound on typical evidence drives.
-
-## PDF analysis: worker isolation and visual diff
-
-```text
-run.rs ──► analyzer::analyze_item ── not a PDF ──► inventory analysis (in process)
-                    │ PDF (%PDF- or .pdf)
-                    ▼
-      worker::analyze_in_worker ── spawn `<exe> worker --in … --item-dir … --opts <json>`
-        limits first (Unix RLIMIT_AS + no core dump; Windows Job Object), then "RV-WORKER-GO" on stdin
-                    ▼
-      child: pdfscan::analyze_pdf ── mmap read-only ─► rv_imgauth_pdf::analyze ─► outputs in the item folder
-                    │ one JSON reply on stdout {"protocol":"rv-imgauth-worker/1","analysis":…}
-                    ▼
-      parent: validate outputs ─► run.rs hashes + audits each (output_written) ─► item_analyzed
-```
-
-- **Failure** (timeout `worker_timeout_s`, crash, `worker_memory_mb` exceeded, bad JSON) → `PARSER_FAILED`
-  (high, `reason`, `exit_code`) and `details.worker` with the stderr tail; the run continues with the next item.
-- **Crash outputs** are kept and listed as `partial_output`, so they are hashed and audited like every other
-  file the tool wrote; they support no finding. Files a successful worker did not list become
-  `unlisted_output`; listed paths outside the item folder are rejected.
-- **Outputs**: `revisions/rev-NN.pdf` (exact byte prefixes, only with >1 revision), `objects.json`,
-  `warnings.json` (every parser warning with its byte offset; always written for an analysed PDF),
-  `embedded/NN-<name>.<jpg|bin>` (+ `.inflated.*` for FlateDecode), `visual/rev-NN-vs-MM-page-PPP.png`.
-- **Visual diff** (`src/render`): consecutive revisions, pages present in both up to `max_pages`, rendered by
-  PDFium on the CPU at `dpi` (lowered for pages above 40 Mpx). A pixel changes when a channel differs by more
-  than 32/255 (anti-aliasing and colour rounding); changes are grouped on an 8 px grid, cells up to 2 cells
-  apart (1 + ⌊12 px merge gap / 8⌋) are joined into one region, regions with fewer than 3 changed pixels are dropped
-  as noise, boxes are padded by 4 px and merged while they touch (max 100 per page, largest kept). Changed pages give
-  a side-by-side PNG (boxes in violet on both halves) and `VISUAL_CHANGE_BETWEEN_REVISIONS` (medium); added or
-  removed pages are listed. Ratios are integer ppm or decimal strings — no floats in audited JSON.
-- **Audit**: `item_analyzed.details.analysis` records the fingerprint DBs used (role, name, version, SHA-256),
-  the PDFium library (path, SHA-256, pinned build), the worker outcome, the visual-diff status and
-  `evidence_rehash` (the worker's digest of the parsed bytes compared with the hashing pass).
 
 ## Why Rust
 
@@ -145,8 +189,8 @@ See [ADR 0001](adr/0001-language.md).
 
 | Page | Covers |
 | --- | --- |
-| [theory.md](theory.md) | The theory and exact algorithms behind every step above (two levels: plain language and expert) |
-| [admissibility.md](admissibility.md) | How each control supports legal requirements; gaps and examiner checklist |
-| [installation.md](installation.md) | Release verification, PDFium check, building from source |
-| [usage.md](usage.md) | End-to-end use, outputs, interpreting findings, verifying a run |
-| [forensic-audit.md](forensic-audit.md) | Audit log files, actions, timestamp, signed reports |
+| [theory.md](theory.md) | Every analysis, with exact parameters, at two levels |
+| [admissibility.md](admissibility.md) | Legal requirements mapped to features; gaps; checklist |
+| [reports.md](reports.md) | Report sections, per-item outputs, finding codes |
+| [forensic-audit.md](forensic-audit.md) | Audit log, review log, timestamp, signed reports |
+| [case-folder.md](case-folder.md) | Shared case folder and intake |
