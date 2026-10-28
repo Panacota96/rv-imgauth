@@ -1,0 +1,30 @@
+[package]
+name = "rv-imgauth-gui"
+description = "RV ImgAuth desktop interface (Windows 10/11, also builds on Linux)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+# egui/eframe 0.37 declare rust-version 1.95.
+rust-version = "1.95"
+authors.workspace = true
+
+[[bin]]
+name = "rv-imgauth-gui"
+path = "src/main.rs"
+
+[lib]
+name = "rv_imgauth_gui"
+path = "src/lib.rs"
+
+[dependencies]
+rv-imgauth-core.workspace = true
+eframe.workspace = true
+serde_json.workspace = true
+
+# Native file/folder pickers on Windows (no GTK/portal dependency elsewhere: a text field is used instead).
+[target.'cfg(windows)'.dependencies]
+rfd.workspace = true
+
+# Icon + version details in the Windows .exe (build.rs; does nothing on other platforms).
+[build-dependencies]
+winresource = "0.1"
