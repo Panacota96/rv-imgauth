@@ -1,7 +1,10 @@
 //! The window. Drawing only: rules live in `state.rs`, work lives in the core (on a worker thread).
 //! Rakvor dark theme; interface language EN/ES/FR switchable at any time (texts from i18n "ui").
 
-use crate::state::{GuiState, MAP_KINDS, OptionChange, Phase, decode_png, verify_digest};
+use crate::state::{
+    FindingText, GuiState, MAP_KINDS, OptionChange, Phase, SideData, StructNode, ViewMode,
+    decode_png, filter_rows, frame_to_map, verify_digest,
+};
 use eframe::egui;
 use rv_imgauth_core::analyzer::Severity;
 use rv_imgauth_core::{Event, HashAlgo, RunConfig, RunSummary, TOOL_VERSION};
@@ -76,6 +79,8 @@ pub struct HashInvApp {
     /// Left side: the original's preview; right side: the selected overlay map.
     original_tex: Option<ViewerTexture>,
     map_tex: Option<ViewerTexture>,
+    /// Structure tree and metadata table of the viewer's item.
+    side: Option<SideData>,
     /// Case folder being typed; applied (and audited) when the field loses focus.
     case_entry: String,
 }
@@ -138,6 +143,7 @@ impl HashInvApp {
             themed: false,
             original_tex: None,
             map_tex: None,
+            side: None,
             case_entry: String::new(),
         }
     }
@@ -199,6 +205,7 @@ impl HashInvApp {
                     self.state.load_results(&summary);
                     self.original_tex = None;
                     self.map_tex = None;
+                    self.side = None;
                     finished = true;
                 }
                 Msg::Done(Err(e)) => {
@@ -453,6 +460,7 @@ impl HashInvApp {
         let tr = |k: &str| self.state.tr(k);
         let mut changes: Vec<OptionChange> = vec![];
         let mut ref_entry = self.state.references_entry.clone();
+        let (mut add_typed_refs, mut remove_ref) = (false, None);
         ui.add_enabled_ui(enabled, |ui| {
             egui::Grid::new("options-grid")
                 .num_columns(2)
@@ -532,6 +540,8 @@ impl HashInvApp {
                     });
                     ui.end_row();
                 });
+            // Reference images: a list (add several, remove one at a time); handed to the core as
+            // `DomainOptions::references`.
             ui.horizontal(|ui| {
                 ui.label(tr("opt_references"));
                 let r = ui.add(
@@ -539,8 +549,9 @@ impl HashInvApp {
                         .hint_text(tr("opt_references_hint"))
                         .desired_width(360.0),
                 );
-                if r.lost_focus() {
-                    changes.push(OptionChange::References(ref_entry.clone()));
+                let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button(tr("opt_references_add")).clicked() || enter {
+                    add_typed_refs = true;
                 }
                 #[cfg(windows)]
                 if ui.button(tr("browse")).clicked() {
@@ -548,14 +559,23 @@ impl HashInvApp {
                         .add_filter("Images", &["jpg", "jpeg", "png", "webp", "heic", "heif"])
                         .pick_files()
                     {
-                        let mut all: Vec<String> = ref_entry
-                            .split(';')
-                            .map(|p| p.trim().to_string())
-                            .filter(|p| !p.is_empty())
-                            .collect();
-                        all.extend(files.iter().map(|f| f.display().to_string()));
-                        changes.push(OptionChange::References(all.join(";")));
+                        let mut all = o.references.clone();
+                        all.extend(files);
+                        changes.push(OptionChange::References(all));
                     }
+                }
+            });
+            ui.indent("opt-references-list", |ui| {
+                if o.references.is_empty() {
+                    ui.weak(tr("opt_references_none"));
+                }
+                for (i, p) in o.references.iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        if ui.small_button("x").on_hover_text(tr("remove")).clicked() {
+                            remove_ref = Some(i);
+                        }
+                        ui.monospace(p.display().to_string());
+                    });
                 }
             });
             ui.horizontal(|ui| {
@@ -583,6 +603,12 @@ impl HashInvApp {
         self.state.fp_db_entry = fp_entry;
         for c in changes {
             self.state.set_option(c);
+        }
+        if add_typed_refs {
+            self.state.add_typed_references();
+        }
+        if let Some(i) = remove_ref {
+            self.state.remove_reference(i);
         }
     }
 
@@ -705,14 +731,55 @@ impl HashInvApp {
         );
         Self::load_texture(ctx, &mut self.original_tex, op, od);
         Self::load_texture(ctx, &mut self.map_tex, mp, md);
+        // Structure and metadata: read once per item.
+        match v.current_item() {
+            Some(it) if self.side.as_ref().map(|s| s.item_index) != Some(it.index) => {
+                self.side = Some(SideData::load(it));
+            }
+            None => self.side = None,
+            _ => {}
+        }
+    }
+
+    /// Draws a picture stretched onto the frame rectangle (so a downscaled map lies over the original).
+    fn paint_picture(painter: &egui::Painter, frame: egui::Rect, tex: &ViewerTexture, alpha: f32) {
+        if let Some(h) = &tex.handle {
+            let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+            painter.image(
+                h.id(),
+                frame,
+                uv,
+                egui::Color32::WHITE.gamma_multiply(alpha),
+            );
+        }
+    }
+
+    fn placeholder(painter: &egui::Painter, rect: egui::Rect, text: String, at: egui::Pos2) {
+        let g = painter.layout(
+            text,
+            egui::FontId::proportional(14.0),
+            GREY,
+            (rect.width() - 48.0).max(100.0),
+        );
+        painter.galley(at - g.size() / 2.0, g, GREY);
+    }
+
+    fn pane_label(painter: &egui::Painter, rect: egui::Rect, label: String) {
+        let g = painter.layout_no_wrap(label, egui::FontId::proportional(13.0), MIST);
+        let bg = egui::Rect::from_min_size(
+            rect.min + egui::vec2(6.0, 6.0),
+            g.size() + egui::vec2(10.0, 6.0),
+        );
+        painter.rect_filled(bg, 4.0, NIGHT.gamma_multiply(0.85));
+        painter.galley(bg.min + egui::vec2(5.0, 3.0), g, MIST);
     }
 
     fn viewer_ui(&mut self, ui: &mut egui::Ui) {
         self.sync_textures(ui.ctx());
         let tr = |k: &str| self.state.tr(k);
-        // Title + selectors.
         let mut back = false;
-        let (mut sel_item, mut sel_map) = (None, None);
+        let (mut sel_item, mut sel_map, mut sel_mode) = (None, None, None);
+        let mut opacity: Option<f32> = None;
         let mut zoom_factor: Option<f32> = None;
         let mut fit = false;
         let header = self.state.viewer_header();
@@ -746,6 +813,7 @@ impl HashInvApp {
             ui.label(tr("item"));
             egui::ComboBox::from_id_salt("viewer-item")
                 .selected_text(&item.name)
+                .width(180.0)
                 .show_ui(ui, |ui| {
                     for (i, it) in v.items.iter().enumerate() {
                         if ui.selectable_label(i == v.item, &it.name).clicked() {
@@ -754,22 +822,47 @@ impl HashInvApp {
                     }
                 });
             ui.label(tr("overlay"));
-            egui::ComboBox::from_id_salt("viewer-map")
-                .selected_text(
-                    v.current_map()
-                        .map(|m| m.name().to_string())
-                        .unwrap_or_else(|| "\u{2014}".into()),
-                )
-                .show_ui(ui, |ui| {
-                    for (i, m) in item.maps.iter().enumerate() {
-                        if ui
-                            .selectable_label(i == v.map, format!("{} ({})", m.name(), m.kind))
-                            .clicked()
-                        {
-                            sel_map = Some(i);
+            // Only the maps this item has.
+            ui.add_enabled_ui(!item.maps.is_empty(), |ui| {
+                egui::ComboBox::from_id_salt("viewer-map")
+                    .selected_text(
+                        v.current_map()
+                            .map(|m| self.state.map_label(m))
+                            .unwrap_or_else(|| "\u{2014}".into()),
+                    )
+                    .width(170.0)
+                    .show_ui(ui, |ui| {
+                        for (i, m) in item.maps.iter().enumerate() {
+                            if ui
+                                .selectable_label(i == v.map, self.state.map_label(m))
+                                .on_hover_text(m.name())
+                                .clicked()
+                            {
+                                sel_map = Some(i);
+                            }
                         }
-                    }
-                });
+                    });
+            });
+            ui.separator();
+            ui.label(tr("view_mode"));
+            for (m, k) in [
+                (ViewMode::SideBySide, "mode_side_by_side"),
+                (ViewMode::Blend, "mode_blend"),
+            ] {
+                if ui.selectable_label(v.mode == m, tr(k)).clicked() && v.mode != m {
+                    sel_mode = Some(m);
+                }
+            }
+            if v.mode == ViewMode::Blend {
+                ui.label(tr("opacity"));
+                let mut o = v.opacity;
+                if ui
+                    .add(egui::Slider::new(&mut o, 0.0..=1.0).fixed_decimals(2))
+                    .changed()
+                {
+                    opacity = Some(o);
+                }
+            }
             ui.separator();
             ui.label(tr("zoom"));
             if ui.button(" - ").clicked() {
@@ -785,12 +878,158 @@ impl HashInvApp {
         });
         ui.weak(tr("viewer_help"));
 
-        // Picture area (original | overlay, synchronised zoom and pan) + findings below.
+        // Side panel: findings, structure tree, metadata table.
         let findings = self.state.viewer_findings();
+        let mut filter = v.meta_filter.clone();
+        egui::Panel::right("viewer-side")
+            .resizable(true)
+            .default_size(400.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("viewer-side-scroll")
+                    .show(ui, |ui| {
+                        self.side_panel(ui, &findings, &mut filter);
+                    });
+            });
+
+        // Picture area: original | overlay (or blended), synchronised zoom and pan.
+        let v = &self.state.viewer;
+        let orig_size = self
+            .original_tex
+            .as_ref()
+            .filter(|t| t.handle.is_some())
+            .map(|t| t.size);
+        let map_tex = self.map_tex.as_ref().filter(|t| t.handle.is_some());
+        let frame = v.frame_size(orig_size, map_tex.map(|t| t.size));
         let avail = ui.available_size();
-        let find_h = (avail.y * 0.30).clamp(110.0, 240.0);
-        let pic_h = (avail.y - find_h - 40.0).max(160.0);
-        ui.horizontal(|ui| {
+        let bottom_h = 118.0;
+        let pic_h = (avail.y - bottom_h).max(160.0);
+        let (area, _) = ui.allocate_exact_size(egui::vec2(avail.x, pic_h), egui::Sense::hover());
+        let mut pan: Option<egui::Vec2> = None;
+        let mut zoom_at: Option<ZoomRequest> = None;
+        let mut reset = false;
+        let mut hover_px: Option<[f32; 2]> = None;
+        let map_name = v
+            .current_map()
+            .map(|m| format!("{} \u{00B7} {}", tr("overlay"), self.state.map_label(m)))
+            .unwrap_or_else(|| tr("overlay"));
+        let panes: Vec<egui::Rect> = match v.mode {
+            ViewMode::SideBySide => {
+                let w = (area.width() - 8.0) / 2.0;
+                vec![
+                    egui::Rect::from_min_size(area.min, egui::vec2(w, area.height())),
+                    egui::Rect::from_min_size(
+                        area.min + egui::vec2(w + 8.0, 0.0),
+                        egui::vec2(w, area.height()),
+                    ),
+                ]
+            }
+            ViewMode::Blend => vec![area],
+        };
+        for (n, rect) in panes.iter().copied().enumerate() {
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 4.0, NIGHT2);
+            let panel = [rect.width(), rect.height()];
+            let fr = frame.map(|f| {
+                let (min, size) = v.frame_rect(panel, f);
+                egui::Rect::from_min_size(
+                    rect.min + egui::vec2(min[0], min[1]),
+                    egui::vec2(size[0], size[1]),
+                )
+            });
+            let show_original = v.mode == ViewMode::Blend || n == 0;
+            let show_map = v.mode == ViewMode::Blend || n == 1;
+            let orig = self.original_tex.as_ref().filter(|t| t.handle.is_some());
+            if let Some(fr) = fr {
+                if show_original && let Some(t) = orig {
+                    Self::paint_picture(&painter, fr, t, 1.0);
+                }
+                if show_map && let Some(t) = map_tex {
+                    let alpha = if v.mode == ViewMode::Blend {
+                        v.opacity
+                    } else {
+                        1.0
+                    };
+                    Self::paint_picture(&painter, fr, t, alpha);
+                }
+                painter.rect_stroke(
+                    fr,
+                    0.0,
+                    egui::Stroke::new(1.0, GREY.gamma_multiply(0.4)),
+                    egui::StrokeKind::Outside,
+                );
+            }
+            // Placeholders say why a side is empty.
+            if show_original && orig.is_none() && !(v.mode == ViewMode::Blend && map_tex.is_some())
+            {
+                let why = match self.original_tex.as_ref().and_then(|t| t.error.clone()) {
+                    Some(e) => e,
+                    None => tr(item.original_placeholder()),
+                };
+                Self::placeholder(&painter, rect, why, rect.center());
+            }
+            if show_map && map_tex.is_none() && v.mode == ViewMode::SideBySide {
+                let why = match self.map_tex.as_ref().and_then(|t| t.error.clone()) {
+                    Some(e) => e,
+                    None => tr("no_maps"),
+                };
+                Self::placeholder(&painter, rect, why, rect.center());
+            }
+            if v.mode == ViewMode::Blend && orig.is_none() && map_tex.is_some() {
+                // Blended without an original: say so under the label.
+                let g = painter.layout(
+                    tr(item.original_placeholder()),
+                    egui::FontId::proportional(12.0),
+                    AMBER,
+                    rect.width() - 24.0,
+                );
+                painter.galley(
+                    rect.left_bottom() + egui::vec2(12.0, -g.size().y - 8.0),
+                    g,
+                    AMBER,
+                );
+            }
+            let label = match (v.mode, n) {
+                (ViewMode::Blend, _) => format!("{} + {}", tr("original"), map_name),
+                (_, 0) => tr("original"),
+                _ => map_name.clone(),
+            };
+            Self::pane_label(&painter, rect, label);
+            let Some(f) = frame else { continue };
+            let resp = ui.interact(
+                rect,
+                ui.make_persistent_id(("rv-viewer-side", n)),
+                egui::Sense::click_and_drag(),
+            );
+            if resp.dragged() {
+                pan = Some(resp.drag_delta());
+            }
+            if resp.double_clicked() {
+                reset = true;
+            }
+            if resp.hovered() {
+                let (scroll, pinch, pointer) = ui.input(|i| {
+                    (
+                        i.smooth_scroll_delta.y,
+                        i.zoom_delta(),
+                        i.pointer.hover_pos(),
+                    )
+                });
+                if let Some(p) = pointer {
+                    let a = p - rect.min;
+                    hover_px = v.panel_to_frame(panel, f, [a.x, a.y]);
+                }
+                let fz = pinch * (scroll / 240.0).exp();
+                if (fz - 1.0).abs() > 1e-4 {
+                    let a = pointer.unwrap_or(rect.center()) - rect.min;
+                    zoom_at = Some((fz, [a.x, a.y], panel, f));
+                }
+            }
+        }
+
+        // Under the pictures: digests, pixel under the cursor, the map's parameters and the fixed sentence.
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
             for (label, tex) in [
                 (tr("original"), self.original_tex.as_ref()),
                 (tr("overlay"), self.map_tex.as_ref()),
@@ -802,148 +1041,63 @@ impl HashInvApp {
                         Some(false) => ui.colored_label(RED, tr("digest_bad")),
                         None => ui.colored_label(GREY, tr("digest_none")),
                     };
-                    if let Some(e) = &t.error {
-                        ui.colored_label(RED, e);
-                    }
                 }
+            }
+            if let (Some(p), Some(f)) = (hover_px, frame) {
+                let mut s = format!(
+                    "{} {:.0}, {:.0}",
+                    tr("pixel_at"),
+                    p[0].floor(),
+                    p[1].floor()
+                );
+                if let Some(t) = map_tex {
+                    let mp = frame_to_map(f, t.size, p);
+                    s.push_str(&format!(
+                        "  \u{2192}  {} {}, {}",
+                        tr("overlay"),
+                        mp[0],
+                        mp[1]
+                    ));
+                }
+                ui.monospace(s);
             }
         });
-        let (area, _) = ui.allocate_exact_size(egui::vec2(avail.x, pic_h), egui::Sense::hover());
-        let mut pan: Option<egui::Vec2> = None;
-        let mut zoom_at: Option<ZoomRequest> = None;
-        let mut reset = false;
-        let w = (area.width() - 8.0) / 2.0;
-        let panels = [
-            (
-                egui::Rect::from_min_size(area.min, egui::vec2(w, area.height())),
-                self.original_tex.as_ref(),
-                tr("original"),
-                if item.analysis_status == "not_completed" {
-                    tr("analysis_not_completed")
-                } else {
-                    tr("no_preview")
-                },
-            ),
-            (
-                egui::Rect::from_min_size(
-                    area.min + egui::vec2(w + 8.0, 0.0),
-                    egui::vec2(w, area.height()),
-                ),
-                self.map_tex.as_ref(),
-                v.current_map()
-                    .map(|m| format!("{} \u{00B7} {}", tr("overlay"), m.name()))
-                    .unwrap_or_else(|| tr("overlay")),
-                tr("no_maps"),
-            ),
-        ];
-        for (n, (rect, tex, label, empty)) in panels.into_iter().enumerate() {
-            let painter = ui.painter_at(rect);
-            painter.rect_filled(rect, 4.0, NIGHT2);
-            match tex.and_then(|t| t.handle.as_ref().map(|h| (h.id(), t.size))) {
-                Some((id, size)) => {
-                    let size = [size[0] as f32, size[1] as f32];
-                    let (sc, off) = v.transform([rect.width(), rect.height()], size);
-                    let img = egui::Rect::from_min_size(
-                        rect.min + egui::vec2(off[0], off[1]),
-                        egui::vec2(size[0] * sc, size[1] * sc),
-                    );
-                    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    painter.image(id, img, uv, egui::Color32::WHITE);
-                    let resp = ui.interact(
-                        rect,
-                        ui.make_persistent_id(("rv-viewer-side", n)),
-                        egui::Sense::click_and_drag(),
-                    );
-                    if resp.dragged() {
-                        pan = Some(resp.drag_delta());
-                    }
-                    if resp.double_clicked() {
-                        reset = true;
-                    }
-                    if resp.hovered() {
-                        let (scroll, pinch, pointer) = ui.input(|i| {
-                            (
-                                i.smooth_scroll_delta.y,
-                                i.zoom_delta(),
-                                i.pointer.hover_pos(),
-                            )
-                        });
-                        let f = pinch * (scroll / 240.0).exp();
-                        if (f - 1.0).abs() > 1e-4 {
-                            let a = pointer.unwrap_or(rect.center()) - rect.min;
-                            zoom_at = Some((f, [a.x, a.y], [rect.width(), rect.height()], size));
-                        }
-                    }
+        if let Some(m) = v.current_map() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    egui::RichText::new(format!("{}:", tr("map_params")))
+                        .color(CYAN)
+                        .strong(),
+                );
+                let lines = self.state.map_params_lines();
+                if lines.is_empty() {
+                    ui.weak(tr("map_no_params"));
                 }
-                None => {
-                    let g = painter.layout(
-                        empty,
-                        egui::FontId::proportional(14.0),
-                        GREY,
-                        (rect.width() - 48.0).max(100.0),
-                    );
-                    painter.galley(rect.center() - g.size() / 2.0, g, GREY);
-                }
-            }
-            let g = painter.layout_no_wrap(label, egui::FontId::proportional(13.0), MIST);
-            let bg = egui::Rect::from_min_size(
-                rect.min + egui::vec2(6.0, 6.0),
-                g.size() + egui::vec2(10.0, 6.0),
-            );
-            painter.rect_filled(bg, 4.0, NIGHT.gamma_multiply(0.85));
-            painter.galley(bg.min + egui::vec2(5.0, 3.0), g, MIST);
-        }
-
-        // Findings for this item.
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(tr("item_findings"))
-                .color(CYAN)
-                .strong(),
-        );
-        egui::ScrollArea::vertical()
-            .id_salt("viewer-findings")
-            .max_height(find_h)
-            .show(ui, |ui| {
-                if findings.is_empty() {
-                    ui.weak(tr("no_findings"));
-                }
-                for f in &findings {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            egui::RichText::new(format!(
-                                " {} ",
-                                self.state.severity_name(f.severity)
-                            ))
-                            .color(NIGHT)
-                            .strong()
-                            .background_color(severity_color(f.severity)),
-                        );
-                        ui.strong(&f.title);
-                        ui.weak(&f.code);
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        ui.colored_label(GREEN, format!("{}:", tr("shows")));
-                        ui.label(&f.shows);
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        ui.colored_label(AMBER, format!("{}:", tr("not_proves")));
-                        ui.label(&f.not_proves);
-                    });
-                    ui.add_space(4.0);
+                for l in lines {
+                    ui.monospace(l).on_hover_text(m.name());
+                    ui.weak("\u{00B7}");
                 }
             });
-
-        // Apply interactions (state rules live in Viewer).
-        let vw = &mut self.state.viewer;
-        if back {
-            vw.close();
+            ui.label(
+                egui::RichText::new(tr("map_visual_aid"))
+                    .color(AMBER)
+                    .italics(),
+            );
         }
+
+        // Apply interactions (state rules live in Viewer); every change of what is shown is audited.
+        let vw = &mut self.state.viewer;
         if let Some(i) = sel_item {
             vw.select_item(i);
         }
         if let Some(m) = sel_map {
             vw.select_map(m);
+        }
+        if let Some(m) = sel_mode {
+            vw.set_mode(m);
+        }
+        if let Some(o) = opacity {
+            vw.set_opacity(o);
         }
         if let Some(f) = zoom_factor {
             vw.set_zoom(vw.zoom * f);
@@ -956,6 +1110,221 @@ impl HashInvApp {
         }
         if let Some((f, a, p, s)) = zoom_at {
             vw.zoom_at(f, a, p, s);
+        }
+        vw.meta_filter = filter;
+        if back {
+            vw.close();
+        } else {
+            self.state.audit_map_view();
+        }
+    }
+
+    fn side_panel(&self, ui: &mut egui::Ui, findings: &[FindingText], filter: &mut String) {
+        let tr = |k: &str| self.state.tr(k);
+        let findings_h = ui.available_height() * 0.45;
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("{} ({})", tr("item_findings"), findings.len()))
+                .color(CYAN)
+                .strong(),
+        )
+        .id_salt("side-findings")
+        .default_open(true)
+        .show(ui, |ui| {
+            if findings.is_empty() {
+                ui.weak(tr("no_findings"));
+            }
+            // Own scroll area: the structure tree and metadata table stay in view below.
+            egui::ScrollArea::vertical()
+                .id_salt("side-findings-scroll")
+                .max_height((findings_h).max(120.0))
+                .show(ui, |ui| {
+                    for f in findings {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                egui::RichText::new(format!(
+                                    " {} ",
+                                    self.state.severity_name(f.severity)
+                                ))
+                                .color(NIGHT)
+                                .strong()
+                                .background_color(severity_color(f.severity)),
+                            );
+                            ui.strong(&f.title);
+                        });
+                        ui.weak(&f.code);
+                        // One wrapped label per sentence (a long digest wraps inside the panel).
+                        for (color, label, text) in [
+                            (GREEN, tr("shows"), &f.shows),
+                            (AMBER, tr("not_proves"), &f.not_proves),
+                        ] {
+                            let mut job = egui::text::LayoutJob::default();
+                            let font = egui::TextStyle::Body.resolve(ui.style());
+                            job.append(
+                                &format!("{label}: "),
+                                0.0,
+                                egui::TextFormat::simple(font.clone(), color),
+                            );
+                            job.append(text, 0.0, egui::TextFormat::simple(font, MIST));
+                            job.wrap.max_width = ui.available_width();
+                            job.wrap.break_anywhere = false;
+                            ui.add(egui::Label::new(job).wrap());
+                        }
+                        ui.add_space(4.0);
+                    }
+                });
+        });
+        let side = self.side.as_ref();
+        let digest_note = |ui: &mut egui::Ui, ok: Option<bool>| match ok {
+            Some(true) => {
+                ui.colored_label(GREEN, tr("digest_ok"));
+            }
+            Some(false) => {
+                ui.colored_label(RED, tr("digest_bad"));
+            }
+            None => {
+                ui.colored_label(GREY, tr("digest_none"));
+            }
+        };
+
+        let structure = side.and_then(|s| s.structure.as_ref());
+        let n = structure
+            .and_then(|l| l.data.as_ref().ok())
+            .map_or(0, |t| StructNode::count(t));
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("{} ({n})", tr("structure_tree")))
+                .color(CYAN)
+                .strong(),
+        )
+        .id_salt("side-structure")
+        .default_open(false)
+        .show(ui, |ui| match structure {
+            None => {
+                ui.weak(tr("structure_none"));
+            }
+            Some(l) => {
+                digest_note(ui, l.digest_ok);
+                match &l.data {
+                    Err(e) => {
+                        ui.colored_label(RED, e);
+                    }
+                    Ok(nodes) => {
+                        ui.weak(format!(
+                            "{} \u{00B7} {} \u{00B7} {}",
+                            tr("col_kind"),
+                            tr("col_offset"),
+                            tr("col_length")
+                        ));
+                        for (i, node) in nodes.iter().enumerate() {
+                            Self::structure_node(ui, node, &[i]);
+                        }
+                    }
+                }
+            }
+        });
+
+        let metadata = side.and_then(|s| s.metadata.as_ref());
+        let rows = metadata
+            .and_then(|l| l.data.as_ref().ok())
+            .map_or(0, |m| m.rows.len());
+        egui::CollapsingHeader::new(
+            egui::RichText::new(format!("{} ({rows})", tr("metadata_table")))
+                .color(CYAN)
+                .strong(),
+        )
+        .id_salt("side-metadata")
+        .default_open(true)
+        .show(ui, |ui| match metadata {
+            None => {
+                ui.weak(tr("metadata_none"));
+            }
+            Some(l) => {
+                digest_note(ui, l.digest_ok);
+                match &l.data {
+                    Err(e) => {
+                        ui.colored_label(RED, e);
+                    }
+                    Ok(m) => {
+                        ui.add(
+                            egui::TextEdit::singleline(filter)
+                                .hint_text(tr("metadata_filter"))
+                                .desired_width(f32::INFINITY),
+                        );
+                        let shown = filter_rows(&m.rows, filter);
+                        if shown.is_empty() {
+                            ui.weak(if m.rows.is_empty() {
+                                tr("metadata_empty")
+                            } else {
+                                tr("metadata_no_match")
+                            });
+                        } else {
+                            egui::Grid::new("metadata-grid")
+                                .num_columns(3)
+                                .striped(true)
+                                .spacing([10.0, 3.0])
+                                .show(ui, |ui| {
+                                    ui.strong(tr("col_group"));
+                                    ui.strong(tr("col_tag"));
+                                    ui.strong(tr("col_value"));
+                                    ui.end_row();
+                                    for r in shown {
+                                        ui.weak(&r.group);
+                                        ui.label(&r.name);
+                                        let short: String = r.value.chars().take(80).collect();
+                                        let resp = ui.monospace(if short.len() < r.value.len() {
+                                            format!("{short}\u{2026}")
+                                        } else {
+                                            short
+                                        });
+                                        if r.value.chars().count() > 80 {
+                                            resp.on_hover_text(&r.value);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                        }
+                        if !m.xmp_history.is_empty() {
+                            ui.add_space(4.0);
+                            ui.strong(tr("xmp_history"));
+                            for h in &m.xmp_history {
+                                ui.monospace(h);
+                            }
+                        }
+                        if !m.problems.is_empty() {
+                            ui.add_space(4.0);
+                            ui.colored_label(AMBER, tr("metadata_problems"));
+                            for p in &m.problems {
+                                ui.label(p);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    fn structure_node(ui: &mut egui::Ui, n: &StructNode, path: &[usize]) {
+        let text = format!("{}  @{}  {} B", n.kind, n.offset, n.length);
+        if n.children.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.monospace(&text);
+                if !n.detail.is_empty() {
+                    ui.weak(&n.detail);
+                }
+            });
+        } else {
+            egui::CollapsingHeader::new(egui::RichText::new(&text).monospace())
+                .id_salt(("structure", path.to_vec()))
+                .default_open(path.len() < 2)
+                .show(ui, |ui| {
+                    if !n.detail.is_empty() {
+                        ui.weak(&n.detail);
+                    }
+                    for (i, c) in n.children.iter().enumerate() {
+                        let mut p = path.to_vec();
+                        p.push(i);
+                        Self::structure_node(ui, c, &p);
+                    }
+                });
         }
     }
 
@@ -1287,6 +1656,25 @@ fn open_path(p: &Path) {
 
 impl eframe::App for HashInvApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.draw(ui);
+    }
+}
+
+impl HashInvApp {
+    /// A window over an existing state (headless rendering, e.g. the documentation screenshot).
+    pub fn from_state(state: GuiState) -> Self {
+        HashInvApp {
+            state,
+            ..Self::new()
+        }
+    }
+
+    pub fn state(&self) -> &GuiState {
+        &self.state
+    }
+
+    /// Draws one frame into the root `ui` (what eframe calls every frame).
+    pub fn draw(&mut self, ui: &mut egui::Ui) {
         if !self.themed {
             apply_theme(ui.ctx());
             self.themed = true;
