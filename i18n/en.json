@@ -176,6 +176,181 @@
       "title": "Registered path now holds different content",
       "shows": "This path was registered earlier as %{previous_id} with other content; the current content gets a new evidence ID.",
       "does_not_prove": "Which version is the original or why the content changed."
+    },
+    "JPEG_MARKER_ORDER_UNUSUAL": {
+      "title": "Unusual JPEG segment order",
+      "shows": "The segments are written in the order %{sequence}; %{expected}.",
+      "does_not_prove": "Software differs in how it writes JPEG headers; an unusual order shows which kind of program saved the file last, not that the picture was changed."
+    },
+    "DUPLICATE_TABLES": {
+      "title": "Tables defined twice",
+      "shows": "%{kind} table(s) %{ids} are defined more than once in the file.",
+      "does_not_prove": "Some encoders repeat tables legitimately; it does not show which content was encoded with which table."
+    },
+    "DATA_AFTER_END_MARKER": {
+      "title": "Data after the end of the image",
+      "shows": "%{bytes} bytes follow the end marker of the %{format} image.",
+      "does_not_prove": "Phones store extra pictures (depth maps, multi-picture files) after the main image; extra data is not by itself hidden or altered content. Examine it separately."
+    },
+    "PROGRESSIVE_ENCODING": {
+      "title": "Progressive JPEG",
+      "shows": "The image is encoded as a progressive JPEG.",
+      "does_not_prove": "Cameras usually write baseline JPEGs, web tools and editors often write progressive ones; it shows how the file was last encoded, not that the content was changed."
+    },
+    "PNG_CHUNK_ORDER_INVALID": {
+      "title": "PNG chunks out of the required order",
+      "shows": "The PNG specification's ordering rules are broken: %{problems}.",
+      "does_not_prove": "It shows the file was written by non-conforming software or edited at byte level; it does not show what changed in the picture."
+    },
+    "PNG_PRIVATE_CHUNKS": {
+      "title": "Private PNG chunks",
+      "shows": "The file contains non-standard chunks: %{chunks}.",
+      "does_not_prove": "Many applications add private chunks (Apple, Adobe, screenshot tools); they identify software, not changes."
+    },
+    "WEBP_FLAGS_MISMATCH": {
+      "title": "WebP header does not match its content",
+      "shows": "The WebP extended header and the chunks disagree: %{problems}.",
+      "does_not_prove": "It shows the file was rewritten or assembled by a tool that did not update the header; it does not show what changed in the picture."
+    },
+    "HEIF_STRUCTURE_ANOMALY": {
+      "title": "Unusual HEIC/HEIF structure",
+      "shows": "The box structure differs from what HEIF writers normally produce: %{problems}.",
+      "does_not_prove": "HEIF writers vary between phone models and software versions; this shows how the file is built, not that the picture was altered."
+    },
+    "HEIF_UNREFERENCED_DATA": {
+      "title": "HEIC/HEIF bytes used by no item",
+      "shows": "%{bytes} bytes of the file belong to no box header and no item.",
+      "does_not_prove": "Free space and padding are allowed by the format; unreferenced data may also be a leftover of an earlier version. Examine it separately."
+    },
+    "EXIF_SOFTWARE_EDITOR": {
+      "title": "Saved by editing or processing software",
+      "shows": "The metadata names %{software} (%{source}).",
+      "does_not_prove": "Editors are used for legitimate tasks (rotating, resizing, converting); it shows which program saved the file, not what was changed."
+    },
+    "XMP_EDIT_HISTORY": {
+      "title": "Edit history in XMP",
+      "shows": "The XMP history lists %{events} event(s); the last by %{last_agent}.",
+      "does_not_prove": "The history records software actions (saved, converted, cropped…) as written by the software; it can be incomplete or edited and does not show what the picture looked like before."
+    },
+    "METADATA_DATES_INCONSISTENT": {
+      "title": "Metadata dates do not agree",
+      "shows": "%{details}.",
+      "does_not_prove": "Clocks, time zones and software that rewrites dates all cause this; it does not show when the picture was taken or changed."
+    },
+    "EXIF_DIMENSIONS_MISMATCH": {
+      "title": "Recorded size differs from the real size",
+      "shows": "The metadata says %{exif} pixels; the image is %{actual}.",
+      "does_not_prove": "Resizing, cropping and rotation by any program cause this; it does not show what was removed or changed."
+    },
+    "METADATA_STRIPPED": {
+      "title": "Little or no camera metadata",
+      "shows": "The %{format} file carries no camera metadata (no make, model or capture date).",
+      "does_not_prove": "Messengers, social networks, screenshots and privacy tools remove metadata routinely; its absence says nothing about the content."
+    },
+    "MESSENGER_TRACES": {
+      "title": "Traces of a messenger or social network",
+      "shows": "The file looks like %{app} output: %{evidence}.",
+      "does_not_prove": "These are typical traits, not a signature: other software can produce the same; it does not show who sent the file or that it was changed."
+    },
+    "MAKERNOTE_MISSING_FOR_MAKE": {
+      "title": "Manufacturer notes missing",
+      "shows": "The metadata names %{make} but has no MakerNote, which that manufacturer's cameras normally write.",
+      "does_not_prove": "Some phones and firmware versions omit MakerNotes and many programs drop them on save; it does not show the camera claim is false."
+    },
+    "METADATA_PROBLEMS": {
+      "title": "Damaged metadata",
+      "shows": "The metadata could not be read completely: %{problems}.",
+      "does_not_prove": "Software bugs and byte-level edits both damage metadata; it does not show which one happened."
+    },
+    "THUMBNAIL_MISMATCH": {
+      "title": "Embedded thumbnail differs from the image",
+      "shows": "The small preview stored in the file differs from the main image (%{difference}). A difference image is in maps/thumbnail-diff.png.",
+      "does_not_prove": "Programs that edit pixels without regenerating the preview leave the old preview; cropping and rotation also cause differences. It does not show which version is the original or who made the change."
+    },
+    "QT_STANDARD_IJG": {
+      "title": "Standard (IJG) compression tables",
+      "shows": "The quantization tables are the IJG standard tables at quality %{quality}.",
+      "does_not_prove": "Very many programs and devices use these tables; they identify a family of encoders, not one program or camera."
+    },
+    "QT_NON_STANDARD": {
+      "title": "Non-standard compression tables",
+      "shows": "The quantization tables are not IJG standard tables; the nearest IJG quality is %{nearest} (distance %{distance}).",
+      "does_not_prove": "Cameras and many apps use their own tables; a quality figure for them is only an approximation and is not stated as fact."
+    },
+    "QT_MATCHES_EDITOR": {
+      "title": "Compression tables of an editor or app",
+      "shows": "The quantization tables match %{label} (%{category}) in the %{db} fingerprint database.",
+      "does_not_prove": "Several programs can share tables and the database is not exhaustive; it shows the last encoder is consistent with that software, not that the content was changed."
+    },
+    "QT_MATCHES_DEVICE": {
+      "title": "Compression tables of a known device",
+      "shows": "The quantization tables match %{label} in the %{db} fingerprint database.",
+      "does_not_prove": "Tables depend on the phone's operating system and app more than on the hardware, and devices share tables; it is consistent with that source, not proof of it."
+    },
+    "QT_UNKNOWN": {
+      "title": "Compression tables not in the database",
+      "shows": "No entry of the fingerprint databases matches these tables (SHA-256 %{hash}).",
+      "does_not_prove": "The database covers few devices and apps; an unknown table says nothing about authenticity. Add known originals with `fingerprints learn`."
+    },
+    "QT_INCONSISTENT_WITH_EXIF_MAKE": {
+      "title": "Compression tables do not fit the camera named",
+      "shows": "The metadata names %{make}, but the tables match %{label}, which is not that manufacturer's encoder.",
+      "does_not_prove": "Re-saving with any program replaces the tables while the metadata may stay; it shows the file was re-encoded after capture, not what was changed."
+    },
+    "DOUBLE_COMPRESSION_SIGNS": {
+      "title": "Signs of repeated JPEG compression",
+      "shows": "The DCT coefficient histograms show the periodic pattern left by two successive JPEG compressions (%{components}; strength %{strength}).",
+      "does_not_prove": "Any re-save — messengers, photo apps, exports — compresses twice; it shows the image was re-encoded at least twice, not that its content was manipulated."
+    },
+    "JPEG_GHOST_REGION": {
+      "title": "Region with a different compression history",
+      "shows": "At quality %{quality} a region of about %{area} of the image re-compresses differently from the rest (JPEG ghost map in maps/).",
+      "does_not_prove": "A region pasted from a lower-quality JPEG shows this, but so can smooth or saturated areas; the map needs expert reading and does not by itself prove a paste."
+    },
+    "COEFFICIENTS_UNAVAILABLE": {
+      "title": "Compression analysis not possible",
+      "shows": "The DCT coefficients could not be read (%{reason}); the double-compression check was not run.",
+      "does_not_prove": "Nothing is concluded from a check that was not run."
+    },
+    "ELA_MAP_WRITTEN": {
+      "title": "Error level map written",
+      "shows": "An Error Level Analysis map was written to maps/ela.png (re-saved at quality %{quality} with %{encoder}, gain %{gain}).",
+      "does_not_prove": "ELA highlights edges and textures in authentic images too and cannot identify a change by itself; it is a visual aid for an examiner, never a result."
+    },
+    "ELA_NOT_APPLICABLE": {
+      "title": "Error level map not applicable",
+      "shows": "The image is %{format} (not JPEG-compressed), so no error level map was made.",
+      "does_not_prove": "Nothing is concluded from an analysis that was not applicable."
+    },
+    "NOISE_INCONSISTENCY_MAP": {
+      "title": "Noise maps written",
+      "shows": "Noise maps were written to maps/ (median residual, and local noise level in %{blocks} blocks: σ from %{sigma_min} to %{sigma_max}).",
+      "does_not_prove": "Authentic photos have regions with different noise (sky, shadows, texture); the maps are visual aids that need expert interpretation and are not a result."
+    },
+    "COPY_MOVE_CANDIDATE": {
+      "title": "Possible copied-and-moved region",
+      "shows": "%{pairs} pair(s) of matching regions were found, displaced by %{shift} (%{blocks} matching blocks); see maps/copymove.png.",
+      "does_not_prove": "Repetitive patterns (tiles, sky, text, fabric) match by nature; the candidate must be checked visually. Scaled or rotated copies are not detected, so no candidate does not mean no copy."
+    },
+    "REFERENCE_INCONSISTENT": {
+      "title": "Differs from the reference images",
+      "shows": "Compared with %{n} reference image(s), these properties differ: %{differences}.",
+      "does_not_prove": "Settings, firmware and apps change these properties on the same device; a difference does not exclude the device and a match does not prove it."
+    },
+    "REFERENCE_CONSISTENT": {
+      "title": "Consistent with the reference images",
+      "shows": "Compared with %{n} reference image(s), these properties agree: %{compared}.",
+      "does_not_prove": "Many devices share these properties; consistency does not prove the image comes from the reference device."
+    },
+    "HEIC_PIXELS_NOT_DECODED": {
+      "title": "HEIC pixels not analysed",
+      "shows": "The HEIC/HEIF structure and metadata were examined; the pixels were not decoded (%{reason}), so no visual maps or copy-move search were made.",
+      "does_not_prove": "Nothing is concluded from analyses that were not run."
+    },
+    "ANALYSIS_SKIPPED_SIZE_CAP": {
+      "title": "Analysis skipped for size",
+      "shows": "%{analysis} was skipped: the image has %{pixels} pixels, above the cap of %{cap} (--max-pixels).",
+      "does_not_prove": "Nothing is concluded from an analysis that was not run; raise the cap on a machine with enough memory."
     }
   },
   "limitations": {
@@ -183,9 +358,13 @@
     "TIMESTAMPS_FROM_FILESYSTEM": "Modification times come from the file system of the examined copy and may differ from the original source.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "A result without findings does not prove that a file is authentic or unaltered before acquisition.",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY": "A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that the examined copy matches the original source.",
-    "NO_FINDING_IS_NOT_AUTHENTICITY": "The absence of findings does not prove that an image is authentic or unaltered: a picture can be staged before it is taken, or re-created or re-encoded so that no trace remains.",
-    "FINGERPRINT_DB_COVERAGE": "Device and software fingerprints come from a limited database (vendor documentation and files generated by Rakvor); software and camera strings can be edited, and unknown or spoofed values cannot be recognised.",
-    "IMAGE_ANALYSES_PLANNED": "In this build the image analyses (metadata and structure checks, quantization-table fingerprints, error level and noise maps, copy-move detection, reference comparison) are planned and not yet implemented: images are hashed, typed and re-read only."
+    "NO_FINDING_IS_NOT_AUTHENTICITY": "An image without findings is not proven authentic: careful edits can leave none of the traces these checks look for, and it is impossible to prove a negative (SWGDE 18-I-001).",
+    "FINGERPRINT_DB_COVERAGE": "The compression-table database covers few devices and apps (built from Rakvor's own captures plus local learning); an absent or matching entry is weak evidence on its own.",
+    "IMAGE_ANALYSES_PLANNED": "In this build the image analyses (metadata and structure checks, quantization-table fingerprints, error level and noise maps, copy-move detection, reference comparison) are planned and not yet implemented: images are hashed, typed and re-read only.",
+    "VISUAL_MAPS_REQUIRE_INTERPRETATION": "Error level, noise and ghost maps are visual aids for a trained examiner; the tool gives them no score and draws no conclusion from them.",
+    "DOUBLE_COMPRESSION_IS_NOT_MANIPULATION": "Double JPEG compression shows the image was saved more than once; ordinary sharing and exporting do this.",
+    "COPY_MOVE_SCALE_ROTATION_NOT_DETECTED": "Copy-move detection compares blocks at the same scale and orientation on a downscaled image: scaled, rotated or small copies are not found.",
+    "NO_VALIDATED_ERROR_RATES_YET": "Error rates of these checks have not yet been measured on a documented validation corpus; the findings are signals to be weighed by the examiner."
   },
   "brand": {
     "descriptor": "FORENSICS | INCIDENT RESPONSE | SECURITY",

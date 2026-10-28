@@ -1,32 +1,53 @@
-//! RV ImgAuth image layer: parsers for the image formats the tool examines (JPEG, HEIC, PNG, WebP).
+//! RV ImgAuth image layer: parsers, metadata, pixel decoding and the analyses that produce signals of
+//! modification for JPEG, HEIC/HEIF, PNG and WebP. Pure Rust, no unsafe code, no I/O and no networking: it only
+//! reads the bytes it is given. The core (`rv_imgauth_core::imgscan`) calls it, in a worker process when the run
+//! isolates items, maps every [`Signal`] to a finding and writes every [`MapImage`] to the item's `maps/` folder.
 //!
-//! Pure Rust, no unsafe code, no I/O and no networking: it only reads the bytes it is given. The core
-//! (`rv_imgauth_core::imgscan`) calls it, in a worker process when the run isolates items.
-//!
-//! This build only provides the entry point; the format parsers are planned.
+//! ```text
+//! parse::      (agent A)  bytes ─► ParsedImage (structure tree, metadata, per-format info, thumbnail)
+//!                         bytes ─► ComponentCoefficients (baseline JPEG, quantized DCT)
+//!                         ParsedImage ─► structure + metadata signals
+//! analysis::   (agent B)  bytes ─► Pixels;  QT fingerprint; double compression; ELA; noise; JPEG ghosts;
+//!                         copy-move; thumbnail comparison; reference comparison
+//! ```
+//! FROZEN API: the functions below keep their signatures; modules behind them may grow.
 
 #![forbid(unsafe_code)]
 
-/// Parses any supported image (format detected from its bytes).
-///
-/// Never panics on hostile input. Returns `Err` with a short reason when the bytes cannot be parsed —
-/// in this build always `"not implemented"`.
-pub fn parse_any(data: &[u8]) -> Result<(), String> {
-    // TODO(img): detect JPEG / HEIC / PNG / WebP and return the parsed structure.
-    let _ = data;
-    Err("not implemented".into())
+pub mod analysis;
+pub mod model;
+pub mod parse;
+
+pub use model::*;
+
+/// Parses any supported image (format detected from its bytes). Never panics on hostile input.
+pub fn parse(data: &[u8]) -> Result<ParsedImage, String> {
+    parse::parse(data)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Kept for the fuzz target and older callers: parse and discard the result.
+pub fn parse_any(data: &[u8]) -> Result<(), String> {
+    parse(data).map(|_| ())
+}
 
-    #[test]
-    fn parse_any_is_not_implemented_yet() {
-        assert_eq!(
-            parse_any(b"\xFF\xD8\xFF\xE0"),
-            Err("not implemented".into())
-        );
-        assert_eq!(parse_any(b""), Err("not implemented".into()));
-    }
+/// Quantized DCT coefficients of a baseline (sequential Huffman) JPEG. Progressive and arithmetic-coded files
+/// return `Err("unsupported: …")` and the coefficient-based analyses are skipped with a finding.
+pub fn decode_coefficients(data: &[u8]) -> Result<Vec<ComponentCoefficients>, String> {
+    parse::jpeg::decode_coefficients(data)
+}
+
+/// Signals from the file structure (marker/chunk/box order, trailing data, flags…).
+pub fn structure_signals(p: &ParsedImage) -> Vec<Signal> {
+    parse::signals::structure(p)
+}
+
+/// Signals from metadata (editor software, edit history, inconsistent dates and sizes, stripped metadata,
+/// messenger traces, MakerNote expectations).
+pub fn metadata_signals(p: &ParsedImage) -> Vec<Signal> {
+    parse::signals::metadata(p)
+}
+
+/// RGB pixels of a JPEG, PNG or WebP (HEIF never: structure only in v1).
+pub fn decode_pixels(data: &[u8], format: Format) -> Result<Pixels, String> {
+    analysis::pixels::decode(data, format)
 }

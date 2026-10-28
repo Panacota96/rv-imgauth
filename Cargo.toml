@@ -19,6 +19,14 @@ repository = "https://github.com/Panacota96/rv-imgauth"
 [workspace.dependencies]
 rv-imgauth-core = { path = "src/core" }
 rv-imgauth-img = { path = "src/img" }
+# Image layer (src/img): parsers, metadata, pixel decoding and analyses. Pure Rust, no GPL/AGPL.
+kamadak-exif = "0.6"
+quick-xml = "0.42"
+zune-jpeg = "0.4"
+image-webp = "0.2"
+jpeg-encoder = "0.7"
+rustfft = "6.4"
+rayon = "1.12"
 # Image viewer (GUI): decodes the PNG maps written in each item folder.
 png = "0.18"
 # Worker isolation: RLIMIT_AS (Unix) and Job Objects (Windows).

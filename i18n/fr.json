@@ -176,6 +176,181 @@
       "title": "Le chemin enregistré contient désormais un autre contenu",
       "shows": "Ce chemin a déjà été enregistré comme %{previous_id} avec un autre contenu ; le contenu actuel reçoit un nouvel ID d'élément.",
       "does_not_prove": "Quelle version est l'originale ni pourquoi le contenu a changé."
+    },
+    "JPEG_MARKER_ORDER_UNUSUAL": {
+      "title": "Ordre inhabituel des segments JPEG",
+      "shows": "Les segments sont écrits dans l'ordre %{sequence} ; %{expected}.",
+      "does_not_prove": "Chaque logiciel écrit les en-têtes JPEG à sa façon ; un ordre inhabituel indique quel type de programme a enregistré le fichier en dernier, pas que l'image a été modifiée."
+    },
+    "DUPLICATE_TABLES": {
+      "title": "Tables définies deux fois",
+      "shows": "Les tables %{kind} %{ids} sont définies plusieurs fois dans le fichier.",
+      "does_not_prove": "Certains encodeurs répètent légitimement les tables ; cela ne montre pas quel contenu a été encodé avec quelle table."
+    },
+    "DATA_AFTER_END_MARKER": {
+      "title": "Données après la fin de l'image",
+      "shows": "%{bytes} octets suivent le marqueur de fin de l'image %{format}.",
+      "does_not_prove": "Les téléphones stockent des images supplémentaires (cartes de profondeur, fichiers multi-images) après l'image principale ; ces données ne sont pas en soi un contenu caché ou altéré. Examinez-les séparément."
+    },
+    "PROGRESSIVE_ENCODING": {
+      "title": "JPEG progressif",
+      "shows": "L'image est encodée en JPEG progressif.",
+      "does_not_prove": "Les appareils photo écrivent généralement des JPEG séquentiels, les outils web et éditeurs souvent des progressifs ; cela montre le dernier encodage, pas une modification du contenu."
+    },
+    "PNG_CHUNK_ORDER_INVALID": {
+      "title": "Blocs PNG hors de l'ordre exigé",
+      "shows": "Les règles d'ordre de la spécification PNG ne sont pas respectées : %{problems}.",
+      "does_not_prove": "Cela montre que le fichier a été écrit par un logiciel non conforme ou modifié au niveau des octets ; cela ne montre pas ce qui a changé dans l'image."
+    },
+    "PNG_PRIVATE_CHUNKS": {
+      "title": "Blocs PNG privés",
+      "shows": "Le fichier contient des blocs non standard : %{chunks}.",
+      "does_not_prove": "De nombreuses applications ajoutent des blocs privés (Apple, Adobe, outils de capture) ; ils identifient un logiciel, pas des modifications."
+    },
+    "WEBP_FLAGS_MISMATCH": {
+      "title": "L'en-tête WebP ne correspond pas au contenu",
+      "shows": "L'en-tête étendu WebP et les blocs ne concordent pas : %{problems}.",
+      "does_not_prove": "Cela montre que le fichier a été réécrit ou assemblé par un outil qui n'a pas mis à jour l'en-tête ; cela ne montre pas ce qui a changé dans l'image."
+    },
+    "HEIF_STRUCTURE_ANOMALY": {
+      "title": "Structure HEIC/HEIF inhabituelle",
+      "shows": "La structure de boîtes diffère de ce que produisent normalement les logiciels HEIF : %{problems}.",
+      "does_not_prove": "Les logiciels HEIF varient selon le modèle de téléphone et la version ; cela montre comment le fichier est construit, pas que l'image a été altérée."
+    },
+    "HEIF_UNREFERENCED_DATA": {
+      "title": "Octets HEIC/HEIF utilisés par aucun élément",
+      "shows": "%{bytes} octets du fichier n'appartiennent à aucun en-tête de boîte ni à aucun élément.",
+      "does_not_prove": "Le format autorise espace libre et remplissage ; des données non référencées peuvent aussi être les restes d'une version antérieure. Examinez-les séparément."
+    },
+    "EXIF_SOFTWARE_EDITOR": {
+      "title": "Enregistré par un logiciel d'édition ou de traitement",
+      "shows": "Les métadonnées nomment %{software} (%{source}).",
+      "does_not_prove": "Les éditeurs servent à des tâches légitimes (rotation, redimensionnement, conversion) ; cela montre quel programme a enregistré le fichier, pas ce qui a été modifié."
+    },
+    "XMP_EDIT_HISTORY": {
+      "title": "Historique de modification XMP",
+      "shows": "L'historique XMP liste %{events} événement(s) ; le dernier par %{last_agent}.",
+      "does_not_prove": "L'historique enregistre des actions logicielles (enregistré, converti, recadré…) telles qu'écrites par le logiciel ; il peut être incomplet ou modifié et ne montre pas l'image d'origine."
+    },
+    "METADATA_DATES_INCONSISTENT": {
+      "title": "Les dates des métadonnées ne concordent pas",
+      "shows": "%{details}.",
+      "does_not_prove": "Horloges, fuseaux horaires et logiciels qui réécrivent les dates le provoquent ; cela ne montre pas quand l'image a été prise ou modifiée."
+    },
+    "EXIF_DIMENSIONS_MISMATCH": {
+      "title": "La taille enregistrée diffère de la taille réelle",
+      "shows": "Les métadonnées indiquent %{exif} pixels ; l'image mesure %{actual}.",
+      "does_not_prove": "Redimensionner, recadrer ou pivoter avec n'importe quel programme le provoque ; cela ne montre pas ce qui a été retiré ou modifié."
+    },
+    "METADATA_STRIPPED": {
+      "title": "Peu ou pas de métadonnées d'appareil",
+      "shows": "Le fichier %{format} ne contient aucune métadonnée d'appareil (ni marque, ni modèle, ni date de prise de vue).",
+      "does_not_prove": "Messageries, réseaux sociaux, captures d'écran et outils de confidentialité suppriment couramment les métadonnées ; leur absence ne dit rien du contenu."
+    },
+    "MESSENGER_TRACES": {
+      "title": "Traces d'une messagerie ou d'un réseau social",
+      "shows": "Le fichier ressemble à une sortie de %{app} : %{evidence}.",
+      "does_not_prove": "Ce sont des traits typiques, pas une signature : d'autres logiciels peuvent produire la même chose ; cela ne montre ni l'expéditeur ni une modification."
+    },
+    "MAKERNOTE_MISSING_FOR_MAKE": {
+      "title": "Notes du fabricant absentes",
+      "shows": "Les métadonnées nomment %{make} mais sans MakerNote, que les appareils de ce fabricant écrivent normalement.",
+      "does_not_prove": "Certains téléphones et firmwares les omettent et de nombreux programmes les suppriment à l'enregistrement ; cela ne prouve pas que l'appareil indiqué est faux."
+    },
+    "METADATA_PROBLEMS": {
+      "title": "Métadonnées endommagées",
+      "shows": "Les métadonnées n'ont pas pu être lues entièrement : %{problems}.",
+      "does_not_prove": "Des bogues logiciels comme des modifications au niveau des octets endommagent les métadonnées ; cela ne montre pas lequel s'est produit."
+    },
+    "THUMBNAIL_MISMATCH": {
+      "title": "La vignette intégrée diffère de l'image",
+      "shows": "L'aperçu stocké dans le fichier diffère de l'image principale (%{difference}). L'image des différences est dans maps/thumbnail-diff.png.",
+      "does_not_prove": "Les programmes qui modifient les pixels sans régénérer l'aperçu laissent l'ancien ; recadrage et rotation causent aussi des différences. Cela ne montre ni quelle version est l'originale ni qui a fait la modification."
+    },
+    "QT_STANDARD_IJG": {
+      "title": "Tables de compression standard (IJG)",
+      "shows": "Les tables de quantification sont les tables standard IJG à la qualité %{quality}.",
+      "does_not_prove": "De très nombreux programmes et appareils utilisent ces tables ; elles identifient une famille d'encodeurs, pas un programme ou un appareil précis."
+    },
+    "QT_NON_STANDARD": {
+      "title": "Tables de compression non standard",
+      "shows": "Les tables de quantification ne sont pas les tables standard IJG ; la qualité IJG la plus proche est %{nearest} (distance %{distance}).",
+      "does_not_prove": "Les appareils et de nombreuses applications utilisent leurs propres tables ; un chiffre de qualité n'est qu'une approximation, non affirmée comme un fait."
+    },
+    "QT_MATCHES_EDITOR": {
+      "title": "Tables de compression d'un éditeur ou d'une application",
+      "shows": "Les tables de quantification correspondent à %{label} (%{category}) dans la base d'empreintes %{db}.",
+      "does_not_prove": "Plusieurs programmes peuvent partager des tables et la base n'est pas exhaustive ; cela montre que le dernier encodeur est compatible avec ce logiciel, pas que le contenu a changé."
+    },
+    "QT_MATCHES_DEVICE": {
+      "title": "Tables de compression d'un appareil connu",
+      "shows": "Les tables de quantification correspondent à %{label} dans la base d'empreintes %{db}.",
+      "does_not_prove": "Les tables dépendent davantage du système et de l'application que du matériel, et les appareils partagent des tables ; c'est compatible avec cette source, sans la prouver."
+    },
+    "QT_UNKNOWN": {
+      "title": "Tables de compression absentes de la base",
+      "shows": "Aucune entrée des bases d'empreintes ne correspond à ces tables (SHA-256 %{hash}).",
+      "does_not_prove": "La base couvre peu d'appareils et d'applications ; une table inconnue ne dit rien de l'authenticité. Ajoutez des originaux connus avec `fingerprints learn`."
+    },
+    "QT_INCONSISTENT_WITH_EXIF_MAKE": {
+      "title": "Les tables de compression ne correspondent pas à l'appareil indiqué",
+      "shows": "Les métadonnées nomment %{make}, mais les tables correspondent à %{label}, qui n'est pas l'encodeur de ce fabricant.",
+      "does_not_prove": "Réenregistrer avec n'importe quel programme remplace les tables tandis que les métadonnées peuvent rester ; cela montre un réencodage après la prise de vue, pas ce qui a changé."
+    },
+    "DOUBLE_COMPRESSION_SIGNS": {
+      "title": "Signes de compression JPEG répétée",
+      "shows": "Les histogrammes de coefficients DCT montrent le motif périodique laissé par deux compressions JPEG successives (%{components} ; intensité %{strength}).",
+      "does_not_prove": "Tout réenregistrement — messageries, applications photo, exports — compresse deux fois ; cela montre au moins deux encodages, pas une manipulation du contenu."
+    },
+    "JPEG_GHOST_REGION": {
+      "title": "Région à l'historique de compression différent",
+      "shows": "À la qualité %{quality}, une région d'environ %{area} de l'image se recompresse différemment du reste (carte des fantômes JPEG dans maps/).",
+      "does_not_prove": "Une région collée depuis un JPEG de qualité inférieure le montre, mais aussi des zones lisses ou saturées ; la carte exige une lecture experte et ne prouve pas à elle seule un collage."
+    },
+    "COEFFICIENTS_UNAVAILABLE": {
+      "title": "Analyse de compression impossible",
+      "shows": "Les coefficients DCT n'ont pas pu être lus (%{reason}) ; le contrôle de double compression n'a pas été exécuté.",
+      "does_not_prove": "Rien n'est conclu d'un contrôle non exécuté."
+    },
+    "ELA_MAP_WRITTEN": {
+      "title": "Carte du niveau d'erreur écrite",
+      "shows": "Une carte d'analyse du niveau d'erreur a été écrite dans maps/ela.png (réenregistrée à la qualité %{quality} avec %{encoder}, gain %{gain}).",
+      "does_not_prove": "L'ELA fait ressortir contours et textures aussi dans les images authentiques et n'identifie pas seul une modification ; c'est une aide visuelle pour l'expert, jamais un résultat."
+    },
+    "ELA_NOT_APPLICABLE": {
+      "title": "Carte du niveau d'erreur non applicable",
+      "shows": "L'image est au format %{format} (sans compression JPEG) ; aucune carte du niveau d'erreur n'a été produite.",
+      "does_not_prove": "Rien n'est conclu d'une analyse non applicable."
+    },
+    "NOISE_INCONSISTENCY_MAP": {
+      "title": "Cartes de bruit écrites",
+      "shows": "Des cartes de bruit ont été écrites dans maps/ (résidu médian, et niveau de bruit local sur %{blocks} blocs : σ de %{sigma_min} à %{sigma_max}).",
+      "does_not_prove": "Les photos authentiques ont des zones de bruit différent (ciel, ombres, textures) ; les cartes sont des aides visuelles à interpréter par un expert, pas un résultat."
+    },
+    "COPY_MOVE_CANDIDATE": {
+      "title": "Région possiblement copiée-déplacée",
+      "shows": "%{pairs} paire(s) de régions concordantes ont été trouvées, décalées de %{shift} (%{blocks} blocs concordants) ; voir maps/copymove.png.",
+      "does_not_prove": "Les motifs répétitifs (carrelage, ciel, texte, tissu) concordent naturellement ; le candidat doit être vérifié visuellement. Les copies redimensionnées ou pivotées ne sont pas détectées : l'absence de candidat ne signifie pas l'absence de copie."
+    },
+    "REFERENCE_INCONSISTENT": {
+      "title": "Diffère des images de référence",
+      "shows": "Comparée à %{n} image(s) de référence, ces propriétés diffèrent : %{differences}.",
+      "does_not_prove": "Réglages, firmware et applications modifient ces propriétés sur un même appareil ; une différence n'exclut pas l'appareil et une concordance ne le prouve pas."
+    },
+    "REFERENCE_CONSISTENT": {
+      "title": "Compatible avec les images de référence",
+      "shows": "Comparée à %{n} image(s) de référence, ces propriétés concordent : %{compared}.",
+      "does_not_prove": "De nombreux appareils partagent ces propriétés ; la concordance ne prouve pas que l'image provient de l'appareil de référence."
+    },
+    "HEIC_PIXELS_NOT_DECODED": {
+      "title": "Pixels HEIC non analysés",
+      "shows": "La structure et les métadonnées HEIC/HEIF ont été examinées ; les pixels n'ont pas été décodés (%{reason}) : pas de cartes visuelles ni de recherche de copie-déplacement.",
+      "does_not_prove": "Rien n'est conclu d'analyses non exécutées."
+    },
+    "ANALYSIS_SKIPPED_SIZE_CAP": {
+      "title": "Analyse ignorée pour la taille",
+      "shows": "%{analysis} a été ignorée : l'image compte %{pixels} pixels, au-delà du plafond de %{cap} (--max-pixels).",
+      "does_not_prove": "Rien n'est conclu d'une analyse non exécutée ; augmentez le plafond sur une machine disposant d'assez de mémoire."
     }
   },
   "limitations": {
@@ -183,9 +358,13 @@
     "TIMESTAMPS_FROM_FILESYSTEM": "Les dates de modification proviennent du système de fichiers de la copie examinée et peuvent différer de la source d'origine.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un résultat sans constatation ne prouve pas qu'un fichier est authentique ni qu'il n'a pas été modifié avant son acquisition.",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un horodatage qualifié prouve que le journal d'audit existait sous cette forme exacte à l'heure indiquée ; il ne prouve pas que la copie examinée correspond à la source d'origine.",
-    "NO_FINDING_IS_NOT_AUTHENTICITY": "L'absence de constatation ne prouve pas qu'une image est authentique ou non modifiée : une scène peut être mise en place avant la prise de vue, ou l'image recréée ou réencodée sans laisser de trace.",
-    "FINGERPRINT_DB_COVERAGE": "Les empreintes d'appareils et de logiciels proviennent d'une base limitée (documentation des éditeurs et fichiers générés par Rakvor) ; les chaînes de logiciel et d'appareil peuvent être modifiées, et les valeurs inconnues ou usurpées ne peuvent pas être reconnues.",
-    "IMAGE_ANALYSES_PLANNED": "Dans cette version, les analyses d'image (métadonnées et structure, empreintes des tables de quantification, cartes de niveau d'erreur et de bruit, détection de copier-déplacer, comparaison avec des références) sont prévues et pas encore implémentées : les images sont seulement hachées, typées et relues."
+    "NO_FINDING_IS_NOT_AUTHENTICITY": "Une image sans constat n'est pas prouvée authentique : des retouches soignées peuvent ne laisser aucune des traces recherchées, et il est impossible de prouver un négatif (SWGDE 18-I-001).",
+    "FINGERPRINT_DB_COVERAGE": "La base des tables de compression couvre peu d'appareils et d'applications (constituée de captures propres à Rakvor et d'apprentissage local) ; une entrée absente ou concordante est un indice faible à elle seule.",
+    "IMAGE_ANALYSES_PLANNED": "Dans cette version, les analyses d'image (métadonnées et structure, empreintes des tables de quantification, cartes de niveau d'erreur et de bruit, détection de copier-déplacer, comparaison avec des références) sont prévues et pas encore implémentées : les images sont seulement hachées, typées et relues.",
+    "VISUAL_MAPS_REQUIRE_INTERPRETATION": "Les cartes de niveau d'erreur, de bruit et de fantômes sont des aides visuelles pour un expert formé ; l'outil ne leur attribue aucun score et n'en tire aucune conclusion.",
+    "DOUBLE_COMPRESSION_IS_NOT_MANIPULATION": "La double compression JPEG montre que l'image a été enregistrée plusieurs fois ; le partage et l'export ordinaires le produisent.",
+    "COPY_MOVE_SCALE_ROTATION_NOT_DETECTED": "La détection de copie-déplacement compare des blocs à même échelle et orientation sur une image réduite : les copies redimensionnées, pivotées ou petites ne sont pas trouvées.",
+    "NO_VALIDATED_ERROR_RATES_YET": "Les taux d'erreur de ces contrôles n'ont pas encore été mesurés sur un corpus de validation documenté ; les constats sont des signaux que l'expert doit apprécier."
   },
   "brand": {
     "descriptor": "INVESTIGATION NUMÉRIQUE | RÉPONSE AUX INCIDENTS | SÉCURITÉ",

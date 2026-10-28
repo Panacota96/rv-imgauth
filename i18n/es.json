@@ -176,6 +176,181 @@
       "title": "La ruta registrada contiene ahora otro contenido",
       "shows": "Esta ruta se registró antes como %{previous_id} con otro contenido; el contenido actual recibe un nuevo ID de evidencia.",
       "does_not_prove": "Cuál versión es la original ni por qué cambió el contenido."
+    },
+    "JPEG_MARKER_ORDER_UNUSUAL": {
+      "title": "Orden inusual de segmentos JPEG",
+      "shows": "Los segmentos están escritos en el orden %{sequence}; %{expected}.",
+      "does_not_prove": "Cada programa escribe las cabeceras JPEG a su manera; un orden inusual indica qué tipo de programa guardó el archivo por última vez, no que la imagen se modificara."
+    },
+    "DUPLICATE_TABLES": {
+      "title": "Tablas definidas dos veces",
+      "shows": "Las tablas %{kind} %{ids} se definen más de una vez en el archivo.",
+      "does_not_prove": "Algunos codificadores repiten tablas de forma legítima; no muestra qué contenido se codificó con cada tabla."
+    },
+    "DATA_AFTER_END_MARKER": {
+      "title": "Datos después del final de la imagen",
+      "shows": "Hay %{bytes} bytes después del marcador de fin de la imagen %{format}.",
+      "does_not_prove": "Los teléfonos guardan imágenes adicionales (mapas de profundidad, archivos multiimagen) tras la principal; los datos adicionales no son por sí mismos contenido oculto o alterado. Examínelos por separado."
+    },
+    "PROGRESSIVE_ENCODING": {
+      "title": "JPEG progresivo",
+      "shows": "La imagen está codificada como JPEG progresivo.",
+      "does_not_prove": "Las cámaras suelen escribir JPEG secuenciales y las herramientas web y editores a menudo progresivos; indica cómo se codificó por última vez, no que el contenido cambiara."
+    },
+    "PNG_CHUNK_ORDER_INVALID": {
+      "title": "Fragmentos PNG fuera del orden exigido",
+      "shows": "Se incumplen las reglas de orden de la especificación PNG: %{problems}.",
+      "does_not_prove": "Indica que el archivo lo escribió un programa no conforme o se editó a nivel de bytes; no muestra qué cambió en la imagen."
+    },
+    "PNG_PRIVATE_CHUNKS": {
+      "title": "Fragmentos PNG privados",
+      "shows": "El archivo contiene fragmentos no estándar: %{chunks}.",
+      "does_not_prove": "Muchas aplicaciones añaden fragmentos privados (Apple, Adobe, capturas de pantalla); identifican software, no cambios."
+    },
+    "WEBP_FLAGS_MISMATCH": {
+      "title": "La cabecera WebP no coincide con su contenido",
+      "shows": "La cabecera extendida WebP y los fragmentos no concuerdan: %{problems}.",
+      "does_not_prove": "Indica que una herramienta reescribió o ensambló el archivo sin actualizar la cabecera; no muestra qué cambió en la imagen."
+    },
+    "HEIF_STRUCTURE_ANOMALY": {
+      "title": "Estructura HEIC/HEIF inusual",
+      "shows": "La estructura de cajas difiere de lo que suelen producir los programas HEIF: %{problems}.",
+      "does_not_prove": "Los programas HEIF varían según modelo de teléfono y versión; indica cómo está construido el archivo, no que la imagen se alterara."
+    },
+    "HEIF_UNREFERENCED_DATA": {
+      "title": "Bytes HEIC/HEIF no usados por ningún elemento",
+      "shows": "%{bytes} bytes del archivo no pertenecen a ninguna cabecera de caja ni a ningún elemento.",
+      "does_not_prove": "El formato admite espacio libre y relleno; los datos no referenciados también pueden ser restos de una versión anterior. Examínelos por separado."
+    },
+    "EXIF_SOFTWARE_EDITOR": {
+      "title": "Guardado con software de edición o procesamiento",
+      "shows": "Los metadatos nombran %{software} (%{source}).",
+      "does_not_prove": "Los editores se usan para tareas legítimas (girar, redimensionar, convertir); indica qué programa guardó el archivo, no qué se cambió."
+    },
+    "XMP_EDIT_HISTORY": {
+      "title": "Historial de edición en XMP",
+      "shows": "El historial XMP enumera %{events} evento(s); el último por %{last_agent}.",
+      "does_not_prove": "El historial registra acciones del software (guardado, convertido, recortado…) tal como las escribe el software; puede estar incompleto o editado y no muestra cómo era la imagen antes."
+    },
+    "METADATA_DATES_INCONSISTENT": {
+      "title": "Las fechas de los metadatos no concuerdan",
+      "shows": "%{details}.",
+      "does_not_prove": "Relojes, zonas horarias y programas que reescriben fechas lo causan; no muestra cuándo se tomó o modificó la imagen."
+    },
+    "EXIF_DIMENSIONS_MISMATCH": {
+      "title": "El tamaño registrado difiere del real",
+      "shows": "Los metadatos indican %{exif} píxeles; la imagen mide %{actual}.",
+      "does_not_prove": "Redimensionar, recortar o girar con cualquier programa lo causa; no muestra qué se quitó o cambió."
+    },
+    "METADATA_STRIPPED": {
+      "title": "Pocos o ningún metadato de cámara",
+      "shows": "El archivo %{format} no contiene metadatos de cámara (ni marca, ni modelo, ni fecha de captura).",
+      "does_not_prove": "Mensajerías, redes sociales, capturas de pantalla y herramientas de privacidad eliminan metadatos habitualmente; su ausencia no dice nada del contenido."
+    },
+    "MESSENGER_TRACES": {
+      "title": "Rastros de una mensajería o red social",
+      "shows": "El archivo parece salida de %{app}: %{evidence}.",
+      "does_not_prove": "Son rasgos típicos, no una firma: otro software puede producir lo mismo; no muestra quién envió el archivo ni que se modificara."
+    },
+    "MAKERNOTE_MISSING_FOR_MAKE": {
+      "title": "Faltan las notas del fabricante",
+      "shows": "Los metadatos nombran %{make} pero no tienen MakerNote, que las cámaras de ese fabricante suelen escribir.",
+      "does_not_prove": "Algunos teléfonos y firmwares las omiten y muchos programas las eliminan al guardar; no demuestra que la cámara indicada sea falsa."
+    },
+    "METADATA_PROBLEMS": {
+      "title": "Metadatos dañados",
+      "shows": "Los metadatos no se pudieron leer por completo: %{problems}.",
+      "does_not_prove": "Errores de software y ediciones a nivel de bytes dañan los metadatos; no muestra cuál ocurrió."
+    },
+    "THUMBNAIL_MISMATCH": {
+      "title": "La miniatura incrustada difiere de la imagen",
+      "shows": "La vista previa guardada en el archivo difiere de la imagen principal (%{difference}). La imagen de diferencias está en maps/thumbnail-diff.png.",
+      "does_not_prove": "Los programas que editan píxeles sin regenerar la vista previa dejan la antigua; recortar y girar también causan diferencias. No muestra qué versión es la original ni quién hizo el cambio."
+    },
+    "QT_STANDARD_IJG": {
+      "title": "Tablas de compresión estándar (IJG)",
+      "shows": "Las tablas de cuantificación son las tablas estándar IJG con calidad %{quality}.",
+      "does_not_prove": "Muchísimos programas y dispositivos usan estas tablas; identifican una familia de codificadores, no un programa o cámara concretos."
+    },
+    "QT_NON_STANDARD": {
+      "title": "Tablas de compresión no estándar",
+      "shows": "Las tablas de cuantificación no son tablas estándar IJG; la calidad IJG más cercana es %{nearest} (distancia %{distance}).",
+      "does_not_prove": "Las cámaras y muchas aplicaciones usan sus propias tablas; una cifra de calidad es solo una aproximación y no se afirma como hecho."
+    },
+    "QT_MATCHES_EDITOR": {
+      "title": "Tablas de compresión de un editor o aplicación",
+      "shows": "Las tablas de cuantificación coinciden con %{label} (%{category}) en la base de huellas %{db}.",
+      "does_not_prove": "Varios programas pueden compartir tablas y la base no es exhaustiva; indica que el último codificador es compatible con ese software, no que el contenido cambiara."
+    },
+    "QT_MATCHES_DEVICE": {
+      "title": "Tablas de compresión de un dispositivo conocido",
+      "shows": "Las tablas de cuantificación coinciden con %{label} en la base de huellas %{db}.",
+      "does_not_prove": "Las tablas dependen más del sistema operativo y la aplicación que del hardware, y los dispositivos comparten tablas; es compatible con ese origen, no lo prueba."
+    },
+    "QT_UNKNOWN": {
+      "title": "Tablas de compresión fuera de la base",
+      "shows": "Ninguna entrada de las bases de huellas coincide con estas tablas (SHA-256 %{hash}).",
+      "does_not_prove": "La base cubre pocos dispositivos y aplicaciones; una tabla desconocida no dice nada de la autenticidad. Añada originales conocidos con `fingerprints learn`."
+    },
+    "QT_INCONSISTENT_WITH_EXIF_MAKE": {
+      "title": "Las tablas de compresión no encajan con la cámara indicada",
+      "shows": "Los metadatos nombran %{make}, pero las tablas coinciden con %{label}, que no es el codificador de ese fabricante.",
+      "does_not_prove": "Volver a guardar con cualquier programa sustituye las tablas aunque se conserven los metadatos; indica que el archivo se recodificó tras la captura, no qué se cambió."
+    },
+    "DOUBLE_COMPRESSION_SIGNS": {
+      "title": "Signos de compresión JPEG repetida",
+      "shows": "Los histogramas de coeficientes DCT muestran el patrón periódico que dejan dos compresiones JPEG sucesivas (%{components}; intensidad %{strength}).",
+      "does_not_prove": "Cualquier nuevo guardado —mensajerías, aplicaciones de fotos, exportaciones— comprime dos veces; indica que la imagen se recodificó al menos dos veces, no que su contenido se manipulara."
+    },
+    "JPEG_GHOST_REGION": {
+      "title": "Región con otro historial de compresión",
+      "shows": "Con calidad %{quality} una región de aproximadamente %{area} de la imagen se recomprime de forma distinta al resto (mapa de fantasmas JPEG en maps/).",
+      "does_not_prove": "Una región pegada desde un JPEG de menor calidad lo muestra, pero también zonas lisas o saturadas; el mapa requiere lectura experta y no prueba por sí solo un pegado."
+    },
+    "COEFFICIENTS_UNAVAILABLE": {
+      "title": "Análisis de compresión no posible",
+      "shows": "No se pudieron leer los coeficientes DCT (%{reason}); no se ejecutó la comprobación de doble compresión.",
+      "does_not_prove": "No se concluye nada de una comprobación que no se ejecutó."
+    },
+    "ELA_MAP_WRITTEN": {
+      "title": "Mapa de nivel de error escrito",
+      "shows": "Se escribió un mapa de Análisis de Nivel de Error en maps/ela.png (guardado de nuevo con calidad %{quality} usando %{encoder}, ganancia %{gain}).",
+      "does_not_prove": "El ELA resalta bordes y texturas también en imágenes auténticas y no identifica un cambio por sí solo; es una ayuda visual para el perito, nunca un resultado."
+    },
+    "ELA_NOT_APPLICABLE": {
+      "title": "Mapa de nivel de error no aplicable",
+      "shows": "La imagen es %{format} (sin compresión JPEG), así que no se generó mapa de nivel de error.",
+      "does_not_prove": "No se concluye nada de un análisis no aplicable."
+    },
+    "NOISE_INCONSISTENCY_MAP": {
+      "title": "Mapas de ruido escritos",
+      "shows": "Se escribieron mapas de ruido en maps/ (residuo de mediana y nivel de ruido local en %{blocks} bloques: σ de %{sigma_min} a %{sigma_max}).",
+      "does_not_prove": "Las fotos auténticas tienen zonas con ruido distinto (cielo, sombras, textura); los mapas son ayudas visuales que requieren interpretación experta y no son un resultado."
+    },
+    "COPY_MOVE_CANDIDATE": {
+      "title": "Posible región copiada y desplazada",
+      "shows": "Se encontraron %{pairs} par(es) de regiones coincidentes, desplazadas %{shift} (%{blocks} bloques coincidentes); ver maps/copymove.png.",
+      "does_not_prove": "Los patrones repetitivos (azulejos, cielo, texto, tejidos) coinciden por naturaleza; el candidato debe comprobarse visualmente. No se detectan copias escaladas o giradas, así que la ausencia de candidatos no significa ausencia de copia."
+    },
+    "REFERENCE_INCONSISTENT": {
+      "title": "Difiere de las imágenes de referencia",
+      "shows": "Comparada con %{n} imagen(es) de referencia, difieren estas propiedades: %{differences}.",
+      "does_not_prove": "Ajustes, firmware y aplicaciones cambian estas propiedades en un mismo dispositivo; una diferencia no excluye el dispositivo y una coincidencia no lo prueba."
+    },
+    "REFERENCE_CONSISTENT": {
+      "title": "Compatible con las imágenes de referencia",
+      "shows": "Comparada con %{n} imagen(es) de referencia, coinciden estas propiedades: %{compared}.",
+      "does_not_prove": "Muchos dispositivos comparten estas propiedades; la coincidencia no prueba que la imagen provenga del dispositivo de referencia."
+    },
+    "HEIC_PIXELS_NOT_DECODED": {
+      "title": "Píxeles HEIC no analizados",
+      "shows": "Se examinaron la estructura y los metadatos HEIC/HEIF; los píxeles no se decodificaron (%{reason}), así que no hay mapas visuales ni búsqueda de copia-desplazamiento.",
+      "does_not_prove": "No se concluye nada de análisis no ejecutados."
+    },
+    "ANALYSIS_SKIPPED_SIZE_CAP": {
+      "title": "Análisis omitido por tamaño",
+      "shows": "Se omitió %{analysis}: la imagen tiene %{pixels} píxeles, más que el límite de %{cap} (--max-pixels).",
+      "does_not_prove": "No se concluye nada de un análisis no ejecutado; suba el límite en un equipo con memoria suficiente."
     }
   },
   "limitations": {
@@ -183,9 +358,13 @@
     "TIMESTAMPS_FROM_FILESYSTEM": "Las fechas de modificación provienen del sistema de archivos de la copia examinada y pueden diferir de la fuente original.",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY": "Un resultado sin hallazgos no prueba que un archivo sea auténtico ni que no haya sido alterado antes de su adquisición.",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY": "Un sello de tiempo confiable prueba que el log de auditoría existía en esta forma exacta en la hora indicada; no prueba que la copia examinada coincida con la fuente original.",
-    "NO_FINDING_IS_NOT_AUTHENTICITY": "La ausencia de hallazgos no prueba que una imagen sea auténtica o no haya sido alterada: una escena puede prepararse antes de la toma, o la imagen recrearse o recodificarse sin dejar rastro.",
-    "FINGERPRINT_DB_COVERAGE": "Las huellas de dispositivos y programas provienen de una base limitada (documentación de fabricantes y archivos generados por Rakvor); los textos de software y de cámara pueden editarse, y los valores desconocidos o falsificados no pueden reconocerse.",
-    "IMAGE_ANALYSES_PLANNED": "En esta versión los análisis de imagen (metadatos y estructura, huellas de tablas de cuantización, mapas de nivel de error y de ruido, detección de copia-desplazamiento, comparación con referencias) están previstos y aún no implementados: las imágenes solo se hashean, se identifican y se releen."
+    "NO_FINDING_IS_NOT_AUTHENTICITY": "Una imagen sin hallazgos no queda probada como auténtica: ediciones cuidadosas pueden no dejar ninguno de los rastros que buscan estas comprobaciones, y no es posible probar un negativo (SWGDE 18-I-001).",
+    "FINGERPRINT_DB_COVERAGE": "La base de tablas de compresión cubre pocos dispositivos y aplicaciones (creada con capturas propias de Rakvor y aprendizaje local); una entrada ausente o coincidente es una prueba débil por sí sola.",
+    "IMAGE_ANALYSES_PLANNED": "En esta versión los análisis de imagen (metadatos y estructura, huellas de tablas de cuantización, mapas de nivel de error y de ruido, detección de copia-desplazamiento, comparación con referencias) están previstos y aún no implementados: las imágenes solo se hashean, se identifican y se releen.",
+    "VISUAL_MAPS_REQUIRE_INTERPRETATION": "Los mapas de nivel de error, ruido y fantasmas son ayudas visuales para un perito formado; la herramienta no les asigna puntuación ni extrae conclusiones.",
+    "DOUBLE_COMPRESSION_IS_NOT_MANIPULATION": "La doble compresión JPEG muestra que la imagen se guardó más de una vez; compartir y exportar de forma habitual lo produce.",
+    "COPY_MOVE_SCALE_ROTATION_NOT_DETECTED": "La detección de copia-desplazamiento compara bloques a la misma escala y orientación en una imagen reducida: no encuentra copias escaladas, giradas o pequeñas.",
+    "NO_VALIDATED_ERROR_RATES_YET": "Las tasas de error de estas comprobaciones aún no se han medido en un corpus de validación documentado; los hallazgos son señales que el perito debe valorar."
   },
   "brand": {
     "descriptor": "FORENSE | RESPUESTA A INCIDENTES | SEGURIDAD",

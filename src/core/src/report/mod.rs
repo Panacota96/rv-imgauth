@@ -22,13 +22,15 @@ pub const SCHEMA_TECHNICAL: &str = "rakvor.item-technical/1";
 pub const SCHEMA_SUMMARY: &str = "rakvor.item-summary/1";
 
 /// Run-level limitations, always printed (what this tool cannot tell you).
-pub const LIMITATIONS: [&str; 7] = [
-    "SIGNATURE_TABLE_LIMITED",
-    "TIMESTAMPS_FROM_FILESYSTEM",
-    "CLEAN_RESULT_IS_NOT_AUTHENTICITY",
-    "TIMESTAMP_PROVES_EXISTENCE_ONLY",
+pub const LIMITATIONS: [&str; 9] = [
     "NO_FINDING_IS_NOT_AUTHENTICITY",
+    "VISUAL_MAPS_REQUIRE_INTERPRETATION",
+    "DOUBLE_COMPRESSION_IS_NOT_MANIPULATION",
     "FINGERPRINT_DB_COVERAGE",
+    "COPY_MOVE_SCALE_ROTATION_NOT_DETECTED",
+    "NO_VALIDATED_ERROR_RATES_YET",
+    "TIMESTAMPS_FROM_FILESYSTEM",
+    "TIMESTAMP_PROVES_EXISTENCE_ONLY",
     "IMAGE_ANALYSES_PLANNED",
 ];
 /// Limitations of one item: the run-level list plus the item's own (`details.limitation`, set by an analysis

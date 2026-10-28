@@ -13,3 +13,15 @@ path = "src/lib.rs"
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# Parsers and metadata (agent A)
+kamadak-exif.workspace = true
+quick-xml.workspace = true
+# Pixels and analyses (agent B)
+zune-jpeg.workspace = true
+png.workspace = true
+image-webp.workspace = true
+jpeg-encoder.workspace = true
+rustfft.workspace = true
+rayon.workspace = true
