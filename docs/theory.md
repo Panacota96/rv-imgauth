@@ -1,24 +1,15 @@
-<!--
-  Template note for the docs agent of a tool scaffolded from rv-imgauth:
-  sections between forge:domain markers describe what THIS tool does (inventory, file types, duplicates,
-  intake role) and must be rewritten for the new tool. Everything outside the markers (hashing, audit chain,
-  case folder, RFC 3161, signed PDFs, custody forms, determinism) is shared code: keep it, and re-check the
-  numbers against the code. The scaffold replaces the tool name everywhere, so re-read any sentence that
-  names the intake tool.
--->
-
 # Theory of operation
 
 This page explains **why** each step of RV ImgAuth works, at two levels:
 
 - **[Part A — For clients, lawyers and judges](#part-a--for-clients-lawyers-and-judges)**: plain language,
-  analogies and pictures. No knowledge of computing or cryptography is needed.
+  analogies and pictures. No prior knowledge of PDF or cryptography is needed.
 - **[Part B — For examiners and opposing experts](#part-b--for-examiners-and-opposing-experts)**: algorithms,
-  data structures, exact constants, the source file that implements each one, and the standards behind them.
-  Every number in Part B is taken from the code of this commit or computed for this page with the tool itself;
-  where the code and a standard or another page differ, Part B says so.
+  data structures, exact thresholds, the source file that implements each one, and the standards and literature
+  behind them. Every number in Part B is taken from the code of this commit; where the code and a standard
+  differ, Part B says so.
 
-It describes what the tool **does**, not what it should do. Known weaknesses are stated where they apply and
+It describes what the tool **does**, not what it should do. Known weaknesses are listed where they apply and
 collected in [admissibility.md](admissibility.md#consolidated-gap-list). How to run the tool:
 [usage.md](usage.md). How to install and verify it: [installation.md](installation.md).
 
@@ -26,154 +17,184 @@ collected in [admissibility.md](admissibility.md#consolidated-gap-list). How to 
 
 - Part A: [A1 What the tool is](#a1-what-the-tool-is-and-is-not) ·
   [A2 Digital fingerprints](#a2-digital-fingerprints-hashes) ·
-  [A3 Two fingerprints, one reading](#a3-two-fingerprints-one-reading) ·
-  [A4 What a file really is](#a4-what-a-file-really-is-its-first-bytes) ·
-  [A5 Identical copies](#a5-identical-copies) ·
-  [A6 The case folder](#a6-the-case-folder-one-register-for-the-whole-case) ·
-  [A7 The tool's own diary](#a7-the-tools-own-diary-the-audit-log) ·
-  [A8 Proving when](#a8-proving-when-trusted-timestamps) ·
-  [A9 Signed reports](#a9-signed-reports) ·
-  [A10 Custody forms](#a10-custody-forms) ·
-  [A11 Reading a clean result](#a11-what-no-findings-means)
+  [A3 How a PDF remembers](#a3-how-a-pdf-remembers-its-past) ·
+  [A4 Earlier versions](#a4-getting-the-earlier-versions-back) ·
+  [A5 Comparing pictures](#a5-comparing-the-versions-by-eye-but-by-machine) ·
+  [A6 Which software](#a6-which-software-saved-the-file) ·
+  [A7 Signatures](#a7-digital-signatures-and-changes-after-signing) ·
+  [A8 Hidden content](#a8-hidden-and-active-content) ·
+  [A9 The tool's own diary](#a9-the-tools-own-diary-the-audit-log) ·
+  [A10 Proving when](#a10-proving-when-trusted-timestamps) ·
+  [A11 Signed reports](#a11-signed-reports) ·
+  [A12 Safety room](#a12-opening-dangerous-files-safely) ·
+  [A13 Reading a clean result](#a13-what-no-findings-means)
 - Part B: [B1 Source map](#b1-source-map-and-constants) ·
   [B2 Pipeline](#b2-pipeline-and-reads-of-the-evidence) ·
-  [B3 Hashing](#b3-single-pass-dual-hashing) ·
-  [B4 Type detection](#b4-type-detection-by-magic-bytes-and-extension-mismatch) ·
-  [B5 Duplicates](#b5-duplicate-detection-by-digest) ·
-  [B6 Audit chain](#b6-the-audit-hash-chain) ·
-  [B7 Case folder](#b7-the-case-folder) ·
-  [B8 RFC 3161](#b8-rfc-3161-trusted-timestamp) ·
-  [B9 Signed reports](#b9-signed-pdf-reports) ·
-  [B10 Custody forms](#b10-custody-forms) ·
-  [B11 Determinism](#b11-determinism-and-repeatability) ·
-  [B12 What findings do not prove](#b12-what-each-finding-does-not-prove) ·
-  [B13 References](#b13-references)
+  [B3 Hashing](#b3-hashing) ·
+  [B4 File structure](#b4-pdf-file-structure-and-revision-detection) ·
+  [B5 Extraction](#b5-revision-extraction-byte-exact-prefixes) ·
+  [B6 Object deltas](#b6-what-changed-in-each-revision) ·
+  [B7 Metadata and dates](#b7-metadata-and-dates) ·
+  [B8 Producer fingerprints](#b8-producer-and-editor-fingerprints) ·
+  [B9 Fonts and page content](#b9-fonts-and-page-content) ·
+  [B10 Signatures and DocMDP](#b10-digital-signatures-and-docmdp) ·
+  [B11 Active content](#b11-active-content-attachments-and-images) ·
+  [B12 Visual diff](#b12-visual-diff-rendering-pixel-comparison-and-boxes) ·
+  [B13 Worker isolation](#b13-worker-isolation) ·
+  [B14 Audit chain](#b14-the-audit-hash-chain) ·
+  [B15 RFC 3161](#b15-rfc-3161-trusted-timestamp) ·
+  [B16 Signed reports](#b16-signed-pdf-reports) ·
+  [B17 Determinism](#b17-determinism-and-reproducibility) ·
+  [B18 References](#b18-references)
 
 ---
 
 # Part A — For clients, lawyers and judges
 
-<!-- forge:domain -->
 ## A1 What the tool is (and is not)
 
-RV ImgAuth is the **intake desk** of a digital investigation. Before anyone examines a file, the tool writes down
-what was received: every file's exact digital fingerprint, its size, what kind of file it really is, and whether
-anything looks wrong (a photo that is really a PDF, a program hidden under another name, an empty file, two
-identical copies). In a case folder it gives each file an evidence number (`E0001`, `E0002`, …) so that every
-later tool can prove it looked at exactly the same bytes.
+RV ImgAuth is a **magnifying glass for PDF files**. It looks for traces that a document was changed after it was
+first saved, and writes down every trace it sees as a **finding**. Each finding says, in plain words, **what it
+shows** and **what it does not prove**.
 
-It never says "this file is genuine" or "this file is fake". Each observation is written as a **finding** that
-says, in plain words, **what it shows** and **what it does not prove**. The conclusion belongs to a human
-examiner.
+It never says "this document is forged" or "this document is authentic". That conclusion belongs to a human
+examiner, who weighs the findings with everything else in the case (witnesses, e-mails, the original source).
 
 ```mermaid
 flowchart LR
-    S[("Source<br/>(phone, laptop, export)")] -->|forensic copy| C[("Verified copy")]
-    C -->|read only| T["RV ImgAuth<br/>intake"]
+    S[("Original source<br/>(e-mail, server, phone)")] -->|forensic copy| C[("Verified copy")]
+    C -->|read only| T["RV ImgAuth"]
     T --> F["Findings<br/>what it shows / what it does not prove"]
-    T --> R[["Evidence register<br/>E0001, E0002, …"]]
     T --> L[("Audit log<br/>every step, sealed")]
-    R --> A["Later tools<br/>re-check each file"]
     F --> E["Examiner's opinion"]
     L --> E
+    E --> R[["Report for the court"]]
 ```
 
 | The tool can tell you | The tool cannot tell you |
 | --- | --- |
-| The exact fingerprint of every file it received, and that later copies are identical | That the copy it received equals the original source |
-| That a file's content does not match its name (e.g. a PDF called `.jpg`) | Why it was renamed, or by whom |
-| That two files have identical content | Who copied them, or when |
-| Every action it performed, in a log that shows any later edit | Whether the workstation's clock was right |
-<!-- /forge:domain -->
+| The file was saved several times, and what each earlier version looked like | Who saved it, or why |
+| A signature no longer covers what is shown today | Whether the signer agreed to the later change |
+| The file passed through an online editor (if it says so in its metadata) | That the metadata was not typed by hand |
+| The exact digital fingerprint of every file it read and wrote | That the copy you gave it equals the original source |
 
 ## A2 Digital fingerprints (hashes)
 
-A **hash** is a short code computed from every byte of a file — a fingerprint. Change one character and the
-fingerprint changes completely; keep the file identical and the fingerprint is the same on any computer, with any
-correct program.
+A **hash** is a short code computed from every byte of a file — like a fingerprint. Change one character and the
+fingerprint changes completely; keep the file identical and the fingerprint is always the same, on any computer.
 
-Real example (SHA-256), using the sample file `examples/sample/evidence/acta.txt` (61 bytes):
+Real example (SHA-256, computed for this page):
 
-| Text (last line of the file) | SHA-256 fingerprint |
+| Text | SHA-256 fingerprint |
 | --- | --- |
-| `Firmado: Ana Ruiz` | `80e089ad6704c831e386b430adf92c5f5b72ec4428566d3580660e103c183c3c` |
-| `Firmado: Ana Ruis` | `590570db76a9735f7b3782c73679fc6af6ac4041be4c41bcba1df0b648115523` |
+| `Amount due: EUR 1,250.00` | `ff105d2ef195aa26a96f6a7eaf3623488d60cc01c2fb7c2ccc94e74ada7577e5` |
+| `Amount due: EUR 7,250.00` | `68890ed16423d5e22e2ba12a10eb995f39694fd9fb1a041413b69884a1c3438e` |
 
-One letter differs; the two fingerprints share nothing recognisable. This is why a hash proves that a file was
-**not** changed: if today's fingerprint equals the one written down at intake, the file is the same, bit for bit.
+One digit differs; the two fingerprints share nothing recognisable. This is why a hash is used to prove that a
+file was **not** changed: if today's fingerprint equals the one written down at intake, the file is the same, bit
+for bit. RV ImgAuth computes one or two fingerprints of every file it reads, and of every file it writes.
 
-## A3 Two fingerprints, one reading
+## A3 How a PDF remembers its past
 
-The examiner may choose **one or two** fingerprint methods (for example SHA-256, the modern standard, plus MD5,
-which older case files often use). The tool reads each file **once** and feeds every piece it reads to both
-methods at the same time, like a cashier who scans each item once while two tills add it up. Both fingerprints
-therefore describe exactly the same bytes. More than two methods at once are refused, so that the work stays
-fast on very large folders.
-
-<!-- forge:domain -->
-## A4 What a file really is: its first bytes
-
-The name of a file (`holiday.jpg`) is a label anyone can change. The **first bytes** of the content are harder to
-fake by accident: most formats start with a fixed "signature" — PDF documents start with `%PDF-`, JPEG photos with
-the bytes `FF D8 FF`, Windows programs with `MZ`. The tool compares the label with the signature.
-
-The sample `foto-vacaciones.jpg` ("holiday photo") starts with `%PDF-1.4`: it is a PDF renamed as a photo, so the
-tool reports *Extension does not match content*. A program hidden under a document name is reported with higher
-severity, because opening it could run it.
-
-Limits a court should know: the tool knows 15 common signatures (unknown types are reported as unknown, not as
-suspicious); a file without an extension is not compared; and some signatures are very short (2 bytes), so an
-ordinary text that happens to start with `MZ` would be reported as a program.
-
-## A5 Identical copies
-
-When two files have the same fingerprint, their contents are identical, whatever their names. The tool groups
-them and reports *Duplicate content*. In the sample, `acta.txt` and `acta-copia.txt` are one such pair. A
-duplicate is information, not a problem: copies are normal. It does not say which copy came first.
-<!-- /forge:domain -->
-
-## A6 The case folder: one register for the whole case
-
-In a real case several Rakvor tools work one after the other. They share **one case folder**, which holds a
-register of the evidence. The intake tool writes each file into it once, with its fingerprints and an evidence
-number. Every later tool, before examining a file, takes its fingerprint again and compares it with the register:
-same fingerprint, same evidence; different fingerprint, a high-severity warning.
+Many programs do not rewrite a PDF when you edit it. They **append** the changes at the end of the file, like a
+notebook where corrections are written on new pages stapled to the back, while the old pages stay untouched.
+This is called an **incremental update**. Each append ends with the marker `%%EOF` ("end of file").
 
 ```mermaid
 flowchart LR
-    I["Intake tool"] -->|"writes once"| R[["Register<br/>E0001 · E0002 · E0003"]]
-    R -->|"compare fingerprints"| A1["Analysis tool 1"]
-    R -->|"compare fingerprints"| A2["Analysis tool 2"]
-    I --> J[("Case diary<br/>who worked on the case, when")]
-    A1 --> J
-    A2 --> J
+    V1["Version 1<br/>invoice: EUR 1,250.00"] --> V2["+ appended: new amount<br/>EUR 7,250.00"]
+    V2 --> V3["+ appended: red PAID stamp"]
+    V3 --> D["What a reader shows today:<br/>EUR 7,250.00 + PAID"]
 ```
 
-The case folder also keeps a **case diary** in which every tool notes when it started and finished and the final
-seal of its own diary (A7). The two diaries quote each other, so one cannot be edited without breaking the other.
+The sample file `edited-incremental.pdf` (in `examples/sample/evidence/`) is exactly that: three saved versions in
+one file of 3 613 bytes.
 
-## A7 The tool's own diary (the audit log)
+![Byte map of the three revisions of edited-incremental.pdf and the prefixes extracted by rv-imgauth](images/theory/revisions-edited-incremental.svg)
 
-Everything the tool does is written to a diary, `audit.jsonl`. Each line carries the seal (hash) of the line
-before it, like numbered pages where every page quotes the seal of the previous page. Editing, inserting,
-deleting or reordering a page breaks the seals from that point on, and `rv-imgauth verify-log` (or an independent
-Python script) detects it.
+Incremental saving is **normal**: filling a form, signing or adding a comment all do it. What matters is
+*what* was changed, *when* (according to the file) and *with what software*.
+
+## A4 Getting the earlier versions back
+
+Because old versions are never overwritten, the first version is simply **the beginning of the file, up to its
+first `%%EOF`**. RV ImgAuth cuts the file at each `%%EOF` and saves each beginning as its own PDF:
+`revisions/rev-01.pdf`, `rev-02.pdf`, … Nothing is reconstructed or guessed: each one is an exact copy of the first
+*N* bytes of the evidence, so anyone can repeat the cut with any tool and get the same fingerprint.
+
+Analogy: a tape recording. To hear what was said at minute 3, you play the tape up to minute 3 — you do not
+re-record anything.
+
+## A5 Comparing the versions by eye, but by machine
+
+The tool draws each page of two consecutive versions as a picture and compares the pictures dot by dot. Where they
+differ, it draws a violet box on both halves of a side-by-side image. In the sample, the only difference between
+version 1 and 2 is one digit of the amount:
+
+![Top of the comparison image for revision 1 vs 2 of edited-incremental.pdf: the digit 1 became 7](images/theory/visual-diff-rev1-vs-rev2.png)
+
+Tiny differences caused only by the way screens smooth letters are ignored, so the boxes point at real changes.
+A change that cannot be seen (for example, in hidden metadata) does not appear in the pictures; other checks
+cover it.
+
+## A6 Which software saved the file?
+
+Most programs write their name inside the PDF ("Producer"), and many also leave structural habits — a bit like a
+printer leaving characteristic marks on paper. RV ImgAuth compares these names and habits with a database of
+known programs (office suites, scanners, PDF editors, online editors, password-removal tools).
+
+Limits a court should know:
+
+- The name can be **typed by hand**; a match is a signal about the software, never about a person.
+- The database covers a limited list of programs (37 bundled entries in this version); unknown software is
+  reported as unknown, not as suspicious.
+
+## A7 Digital signatures and changes after signing
+
+A digital signature works like a **sealed envelope**: it seals an exact set of bytes. If one byte inside changes,
+the seal breaks. But a PDF can still receive **new pages stapled outside the envelope** (incremental updates). The
+seal stays intact, yet the reader shows the newer content.
+
+RV ImgAuth checks three things:
+
+1. Is the seal intact? (the signed bytes still match the signature)
+2. Which version is inside the envelope? (the signature covers exactly one saved version)
+3. Was anything added outside the envelope afterwards, and of what kind? (form filling, comments, or other changes)
+
+A **certifying** signature can also carry a note "only these kinds of changes are allowed afterwards" (called
+*DocMDP*: none / form filling and signing / also comments). The tool reports changes that go beyond that note.
+
+What the tool does **not** do: it does not check **who** owned the signing key (certificate authority, revocation).
+A mathematically valid seal can come from a self-made certificate.
+
+## A8 Hidden and active content
+
+| Trace | Plain meaning | Common innocent reason |
+| --- | --- | --- |
+| Invisible text | Text drawn so that it cannot be seen (transparent, white, "invisible" mode) | Searchable text layer of a scan |
+| Text over a scanned image | A page that is a photo/scan also contains typed text | OCR software makes scans searchable |
+| JavaScript | Small programs inside the PDF | Form calculations |
+| Launch action | The PDF asks the viewer to open a file or program | Rare; viewers ask before doing it |
+| Attachments | Files embedded inside the PDF | Invoices with XML data, portfolios |
+
+## A9 The tool's own diary (the audit log)
+
+Everything the tool does is written to a diary, `audit.jsonl`. Each line carries the fingerprint of the line before
+it, like numbered pages where every page quotes the seal of the previous page. Tearing out, editing or reordering a
+page breaks every later seal, and `rv-imgauth verify-log` (or an independent Python script) detects it.
 
 ```mermaid
 flowchart LR
-    G["start<br/>000…000"] --> E1["#1 run started<br/>seal 6db9fbe2…"]
-    E1 --> E2["#2 3 files found<br/>quotes 6db9fbe2…<br/>seal 4c78f96c…"]
-    E2 --> E3["#3 acta.txt hashed<br/>quotes 4c78f96c…"]
-    X["someone edits #2:<br/>3 files becomes 2"] -.->|"seal becomes f6a7e0fc…<br/>#2 no longer matches"| E2
+    G["start<br/>000…000"] --> E1["#1 run started<br/>seal 9f75ade1…"]
+    E1 --> E2["#2 inputs resolved<br/>quotes 9f75ade1…<br/>seal 0997f3dc…"]
+    E2 --> E3["#3 …<br/>quotes 0997f3dc…"]
+    X["someone edits #2:<br/>7 items becomes 6"] -.->|seal becomes 84db8a34…<br/>#3 no longer matches| E3
 ```
 
-One honest limit: if the **last** pages are torn out, the remaining pages still agree with each other. That is
-why the diary's final seal is also written in the case diary, printed in the reports and sent to a notary (A8).
-
-## A8 Proving when: trusted timestamps
+## A10 Proving when: trusted timestamps
 
 The diary proves its own consistency, not *when* it was written. For that, the tool sends the latest seal to a
-**time-stamping authority** — an independent online notary — which signs "I saw this seal at 15:30:01 UTC on
+**time-stamping authority** — an independent online notary — which signs "I saw this seal at 10:39 UTC on
 21 October 2026". The notary never sees the evidence, only a 32-byte seal.
 
 ```mermaid
@@ -181,39 +202,48 @@ sequenceDiagram
     participant T as RV ImgAuth
     participant N as Time-stamping authority (notary)
     T->>N: latest seal of the diary (32 bytes)
-    N-->>T: signed receipt "seen at 2026-10-21 15:30:01 UTC"
+    N-->>T: signed receipt: "seen at 2026-10-21 10:39:08 UTC"
     Note over T: receipt stored next to the diary (timestamp-NNNNN.tsr)
 ```
 
-Without internet the run still finishes; the receipt can be requested later with `rv-imgauth timestamp`. A
-timestamp proves the diary existed at that time — not that its content is true.
+Without internet the run still finishes; the receipt can be requested later with `rv-imgauth timestamp`.
+A timestamp proves the diary existed at that time — not that its content is true.
 
-## A9 Signed reports
+## A11 Signed reports
 
 With the examiner's certificate, every PDF report is digitally signed, so any later change to a report is
 detectable with Adobe Reader or another validator. The HTML and JSON reports are not signed, but their
-fingerprints are written in the diary, which is timestamped.
+fingerprints are written in the diary.
 
-## A10 Custody forms
+## A12 Opening dangerous files safely
 
-For every file the tool pre-fills a **chain-of-custody form** — Colombian style (Spanish) or French style (French),
-always with an English copy — with the case number, the evidence number, the fingerprints and the times of the
-work, and leaves empty rows for the people who hand over and receive the evidence to sign. It is an internal
-record that accompanies, but does not replace, the official form of the police, prosecutor or court.
+PDF files can be damaged or deliberately built to crash programs. RV ImgAuth opens each PDF in a **separate,
+locked room** (a worker process) with a time limit and a memory limit. If the file crashes the room, the main
+program notes "analysis did not complete" (`PARSER_FAILED`) and moves on to the next file; the diary is never
+touched by the room.
 
-<!-- forge:domain -->
-## A11 What "no findings" means
+```mermaid
+flowchart LR
+    M["Main program<br/>(keeps the diary)"] -->|"go"| W["Locked room<br/>time + memory limits"]
+    W -->|"results"| M
+    W -.->|"crash / hang"| F["PARSER_FAILED<br/>next file continues"]
+    F --> M
+```
 
-A file without findings is **not** proven authentic. It only means that the checks this tool applies found
-nothing. Every report prints these limitations:
+## A13 What "no findings" means
 
-- Type detection uses a limited table of common file signatures; unknown types are reported as unknown, not as
-  suspicious.
-- Modification times come from the file system of the examined copy and may differ from the original source.
-- A result without findings does not prove that a file is authentic or unaltered before acquisition.
-- A trusted timestamp proves the audit log existed in this exact form at the stated time; it does not prove that
-  the examined copy matches the original source.
-<!-- /forge:domain -->
+A file without findings is **not** proven authentic. A forger can create a clean new PDF from scratch, or "print to
+PDF", which erases all history. The tool's limitations are printed in every report, for example:
+
+- When a PDF is printed to PDF, flattened, optimised or regenerated, its earlier revisions and most editing
+  traces are lost; only its last state can be examined.
+- Dates and producer names are written by the software that saved the file and can be set freely.
+
+Item-specific limitations are added where they apply: `VISUAL_DIFF_UNAVAILABLE` is printed in an item's reports
+(and listed in `technical.json` → `limitations`) when PDFium was missing or could not open or render a revision, so
+part or all of the visual comparison is missing.
+- Changes inside the pixels of a scanned image (retouching) are not detected.
+- The copy examined is compared with nothing before intake: integrity is proven **from intake onward**.
 
 ---
 
@@ -223,557 +253,679 @@ nothing. Every report prints these limitations:
 
 | Process | Implementation | Key constants (value in this commit) |
 | --- | --- | --- |
-| Input collection | [src/core/src/input.rs](../src/core/src/input.rs) | folders 1 level unless `--recursive`; symbolic links never followed; paths made absolute and lexically normalised, de-duplicated, sorted by that string bytewise (UTF-8; same rule as the Python profile), numbered from 1; a UTF-8 BOM at the start of an `--input-list` file is ignored |
-| Log verification | [src/core/src/verify.rs](../src/core/src/verify.rs) | chain + timestamps + truncation anchors (timestamp `covers_seq`, case log `run_finished`) |
-| Hashing | [src/core/src/hash.rs](../src/core/src/hash.rs) | `CHUNK` = 1 MiB (1 048 576 bytes); `MAX_SELECTED` = 2; head kept for detection = first 4 096 bytes; known answers for `"abc"` |
-| Pipeline | [src/core/src/run.rs](../src/core/src/run.rs) | progress events every 150 ms; run id = `YYYYMMDDTHHMMSSZ-` + 6 hex of SHA-256(clock, pid, host) |
-| Audit chain | [src/core/src/audit.rs](../src/core/src/audit.rs), [tests/verify_chain.py](../tests/verify_chain.py) | genesis = 64 zeros; SHA-256 over canonical JSON |
-| Case folder | [src/core/src/case.rs](../src/core/src/case.rs) | schemas `rakvor.case/1`, `rakvor.registry/1`; lock wait 30 s; stale lock 600 s; ids `E%04d` |
-| Timestamp, report signing | [src/core/src/trust.rs](../src/core/src/trust.rs) | default TSA `http://timestamp.digicert.com`; HTTP timeout 15 s; response ≤ 1 MiB; nonce 8 bytes |
-| PDF writer | [src/core/src/report/pdf.rs](../src/core/src/report/pdf.rs) | A4 595 × 842 pt; signature placeholder 16 384 bytes |
-| Reports | [src/core/src/report/mod.rs](../src/core/src/report/mod.rs) | duplicate partners listed ≤ 10, duplicate paths ≤ 20 per group; 6 blank custody transfer rows; item folder name ≤ 60 characters |
-| Environment record | [src/core/src/env.rs](../src/core/src/env.rs), [src/core/build.rs](../src/core/build.rs) | compiler, target and every `Cargo.lock` package embedded at build time; product version from `version.txt` |
+| Hashing | [src/core/src/hash.rs](../src/core/src/hash.rs) | `CHUNK` = 1 MiB; at most 2 algorithms per run; known answers for `"abc"` |
+| Linear scan, revisions, xref | `src/pdf/src/doc.rs` | `MAX_REVISIONS` = 2000; `MAX_WARNINGS` = 500; parse budget = 64 × file size + 64 MiB; decode budget = 2 GiB |
+| Revision bytes | `src/pdf/src/lib.rs` `revision_bytes` | `file[..end_offset]` |
+| Findings | `src/pdf/src/analysis.rs` | `MIN_REVISION_GAP_SECS` = 3600; `IMAGE_PAGE_COVER` = 0.5; `MAX_PAGE_FINDINGS` = 100; `CONTENT_OP_BUDGET` = 50 000 000 |
+| Dates, Info, XMP | `src/pdf/src/meta.rs` | XMP packet ≤ 16 MiB, XML depth ≤ 64, ≤ 200 000 nodes |
+| Page tree, content interpreter | `src/pdf/src/pages.rs` | ≤ 100 000 pages, tree depth ≤ 64, form depth ≤ 4, ≤ 64 saved graphics states |
+| Stream filters | `src/pdf/src/filters.rs` | decoded stream ≤ 128 MiB, ≤ 8 filters per stream |
+| Signatures, DocMDP | `src/pdf/src/sig.rs` | SHA-256/384/512, RSA PKCS #1 v1.5 only |
+| Producer fingerprints | `src/pdf/src/fingerprint.rs`, [fingerprints/starter.json](../fingerprints/starter.json), [src/core/src/fingerprints.rs](../src/core/src/fingerprints.rs), [src/cli/src/fingerprints.rs](../src/cli/src/fingerprints.rs) | starter DB `rakvor-starter` 2026.10.21, 37 entries |
+| Derived outputs | `src/core/src/pdfscan.rs` | inflated stream ≤ 256 MiB; ≤ 1000 embedded outputs per item |
+| Rendering | `src/render/src/lib.rs`, `third_party/pdfium/PDFIUM_VERSION.txt` | PDFium `chromium/7881`; ≤ 40 000 000 px and ≤ 20 000 px per side per page |
+| Pixel diff | `src/render/src/image.rs`, `src/core/src/visual.rs` | tolerance 32, cell 8 px, merge gap 12 px, pad 4 px, min 3 px, ≤ 100 boxes |
+| Worker isolation | [src/core/src/worker.rs](../src/core/src/worker.rs) | defaults 120 s, 2048 MiB; stdout ≤ 64 MiB; stderr tail 4 KiB |
+| Audit chain | [src/core/src/audit.rs](../src/core/src/audit.rs), [tests/verify_chain.py](../tests/verify_chain.py) | genesis = 64 zeros |
+| Timestamp, report signing | [src/core/src/trust.rs](../src/core/src/trust.rs), [src/core/src/report/pdf.rs](../src/core/src/report/pdf.rs) | default TSA `http://timestamp.digicert.com`; HTTP timeout 15 s; response ≤ 1 MiB |
 
-<!-- forge:domain -->
-| Domain process | Implementation | Key constants |
-| --- | --- | --- |
-| Type detection, extension mismatch, executables, empty files | [src/core/src/analyzer.rs](../src/core/src/analyzer.rs) | 15 signatures; text extensions `txt csv log xml json html` |
-| Duplicates, intake registration | [src/core/src/report/mod.rs](../src/core/src/report/mod.rs) `duplicate_groups`; [src/core/src/run.rs](../src/core/src/run.rs) `register_items` | primary (first) algorithm; size > 0 |
-| Role in the case folder | [src/core/src/lib.rs](../src/core/src/lib.rs) `CASE_ROLE` | `Intake` |
-<!-- /forge:domain -->
+The PDF layer (`src/pdf`) is `#![forbid(unsafe_code)]`, never writes files and never panics by design (fuzzed
+nightly in CI with `fuzz/fuzz_targets/analyze.rs`; robustness tests in
+`src/pdf/tests/no_panic.rs`). The core decides what to write and audits it.
 
-The core never prints; the CLI ([src/cli/src/main.rs](../src/cli/src/main.rs)) and the GUI
-([src/gui/src/state.rs](../src/gui/src/state.rs)) render the same event stream, so both front-ends produce the
-same audit actions, findings and reports.
-
-<!-- forge:domain -->
 ## B2 Pipeline and reads of the evidence
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant R as run.rs
+    participant R as run.rs (parent)
     participant A as audit.jsonl
-    participant C as case folder
     participant E as Evidence (read-only)
-    participant O as reports folder
-    R->>C: verify case log + registry, append run_started (under lock)
-    R->>A: run_started, case_linked, ui_* (GUI), environment_recorded, inputs_resolved
-    loop every item
-        R->>A: item_started (size, mtime)
-        R->>E: File::open, 1 MiB chunks, 1–2 digests + first 4 KiB
-        R->>A: item_hashed (digests, bytes_read, mtime_unchanged)
-        R->>A: item_analyzed (type, extension, findings, status)
-    end
-    R->>C: register items, write registry, append evidence_registered (under lock)
-    R->>A: evidence_registered ×N, duplicate_group, hash_register_written
-    R->>O: per-item reports, then item_reports_written ×N
-    R->>A: timestamp_obtained / timestamp_pending, statistics_report_written, run_finished
-    R->>C: run_finished with the final audit head (under lock)
+    participant W as worker process
+    participant O as item folder
+    R->>A: run_started, environment_recorded, inputs_resolved
+    R->>A: item_started (size, mtime)
+    R->>E: pass 1: File::open, 1 MiB chunks, 1–2 digests
+    R->>A: item_hashed (digests, mtime_unchanged)
+    R->>A: analysis_started (isolation)
+    R->>W: spawn, limits, "RV-WORKER-GO"
+    W->>E: pass 2: read-only memory map, re-hash, parse, render
+    W->>O: revisions/, objects.json, embedded/, visual/
+    W-->>R: one JSON reply (findings, details, outputs)
+    R->>O: hash every output
+    R->>A: output_written (one per file), item_analyzed
 ```
 
-The evidence is read **once**, sequentially, with `File::open` (read-only access). The type check uses the first
-4 096 bytes kept during that same read, so there is no second read and no window in which the bytes hashed and
-the bytes examined could differ. The modification time is read before and after hashing and compared
-(`mtime_unchanged` in `item_hashed`); a change means the file was being written during the read.
+The evidence is read **twice**: once for hashing (sequential) and once by the worker (memory-mapped, random
+access). Both opens are read-only. The worker **re-hashes the memory-mapped bytes it parses** with the run's
+primary algorithm (the first of `--hash`) and compares the digest with the first pass (`--expect-digest` on the
+worker command line). The comparison is recorded in `details.evidence_rehash` (algorithm, both digests, bytes,
+`match`) and in the `item_analyzed` audit entry; a difference raises `EVIDENCE_CHANGED_DURING_ANALYSIS` (high):
+the file changed between the two reads, so the findings may describe other bytes than the digests. The
+modification time is still compared around the first pass (`mtime_unchanged`). Run on a write-protected copy
+anyway: the check detects a change, it does not prevent it (gap G20, closed in code).
 
-Ordering facts an opposing expert may test:
+Non-PDF files (no `%PDF-` at offset 0 and no `.pdf` extension) get only the inventory checks of
+[src/core/src/analyzer.rs](../src/core/src/analyzer.rs) (type by signature, extension mismatch, executable, empty),
+in process.
 
-- Registration happens **after** all items are hashed and **before** duplicates are computed, so a cancelled run
-  still registers the items it finished.
-- The timestamp is requested after the last `item_reports_written` and **before** the statistics report, so the
-  token covers every evidence digest, finding and item-report digest, but not the statistics report or
-  `run_finished` (both are written after it; see [B8](#b8-rfc-3161-trusted-timestamp)).
-- A wrong certificate password stops the run (`run_failed`) before any evidence byte is read.
-<!-- /forge:domain -->
-
-## B3 Single-pass dual hashing
+## B3 Hashing
 
 | Algorithm | Standard | Output | Status for evidence |
 | --- | --- | --- | --- |
-| `md5` | RFC 1321 | 128 bit | Practical collisions since 2004–2005 (Wang & Yu); legacy matching only |
-| `sha1` | FIPS 180-4 | 160 bit | Practical collision 2017 (Stevens et al., "SHAttered"); legacy matching only |
-| `sha256` | FIPS 180-4 | 256 bit | Default; recommended primary |
-| `sha512` | FIPS 180-4 | 512 bit | Recommended |
-| `sha3-256` | FIPS 202 | 256 bit | Sound; less familiar to courts |
-| `blake3` | BLAKE3 specification (2020) | 256 bit | Sound; not a NIST-approved hash |
+| md5 | RFC 1321 | 128 bit | Practical collisions since 2004–2005 (Wang & Yu); legacy matching only |
+| sha1 | FIPS 180-4 | 160 bit | Practical collision 2017 (Stevens et al., "SHAttered"); legacy matching only |
+| sha256 | FIPS 180-4 | 256 bit | Default; recommended primary |
+| sha512 | FIPS 180-4 | 512 bit | Recommended |
+| sha3-256 | FIPS 202 | 256 bit | Sound; less familiar to courts |
+| blake3 | BLAKE3 specification (2020) | 256 bit | Sound; not a NIST-approved hash |
 
-Implementations: RustCrypto `md-5`, `sha1`, `sha2`, `sha3` and the official `blake3` crate (exact versions in each
-run's `environment.json` → `dependencies`).
+- One read loop feeds both selected digests ([hash.rs](../src/core/src/hash.rs) `hash_reader`), so both describe
+  the same bytes. The first selected algorithm is the **primary** (duplicates, customer summary).
+- `self-test` checks every algorithm against the published digest of `"abc"` (e.g. SHA-256
+  `ba7816bf…f20015ad`, FIPS 180-4 example). It proves the build computes correct digests; it does not test the
+  PDF analysis.
+- Avalanche, measured: the two texts of [A2](#a2-digital-fingerprints-hashes) differ in 1 character (2 bits:
+  `'1'` = 0x31, `'7'` = 0x37); their SHA-256 digests differ in **144 of 256 bits** (expected ≈ 128 for an ideal
+  function), and only 1 of the 64 hexadecimal positions coincides.
+- The tool does **not** enforce a policy that SHA-256 (or stronger) is one of the two algorithms: `md5,sha1` is
+  accepted. Policy is the examiner's (see [usage.md](usage.md#1-before-you-start)).
 
-```text
-hash_reader(r, algos)                                        src/core/src/hash.rs
-  validate_selection: 1 ≤ len ≤ 2, the two different        → else usage error (exit 2)
-  loop:
-    n = r.read(buf[0 .. 1 048 576])                          Interrupted → retry; other error → UNREADABLE
-    if n = 0: break
-    head += buf[0 .. min(n, 4096 − len(head))]               first 4 KiB, for type detection
-    for each hasher h: h.update(buf[0 .. n])                 the same slice feeds both digests
-    total += n
-    if on_chunk(total) = false: return cancelled             cancel granularity = one chunk
-  return (digests in selection order, total, head)
-```
+## B4 PDF file structure and revision detection
 
-- **Same bytes for both digests.** Each chunk is passed to every hasher before the next read, so the two digests
-  can only describe the same byte stream. The unit test `one_pass_feeds_two_digests_identically_to_separate_passes`
-  checks a 3 MiB + 17-byte stream against separate one-shot digests.
-- **Primary algorithm.** The first selected algorithm is the primary: it groups duplicates, is shown as the
-  customer's "digital fingerprint" and is compared first with the case registry.
-- **`self-test`** checks every algorithm against the published digest of `"abc"` (e.g. SHA-256
-  `ba7816bf…f20015ad`, FIPS 180-4 example). It proves the build computes correct digests; it does not test type
-  detection or reports.
-- **Avalanche, measured** for [A2](#a2-digital-fingerprints-hashes): the two inputs differ in one character
-  (`'z'` = 0x7A, `'s'` = 0x73, 2 bits); their SHA-256 digests differ in **136 of 256 bits** (≈ 128 expected for an
-  ideal function), and only 4 of the 64 hexadecimal positions coincide.
-- **No hash policy.** The tool accepts `md5,sha1` without any SHA-2/SHA-3/BLAKE3 algorithm. Choosing at least
-  one collision-resistant algorithm is the examiner's job ([admissibility.md](admissibility.md#consolidated-gap-list), G11).
-- **Size.** `item_started` records the size from the file system; `item_hashed` records `bytes_read`. The reports
-  use `bytes_read`. A difference between the two means the file changed size while it was being read.
+### Byte layout of an incrementally updated PDF
 
-<!-- forge:domain -->
-## B4 Type detection by magic bytes and extension mismatch
-
-### Signature table ([analyzer.rs](../src/core/src/analyzer.rs) `SIGNATURES`, first match wins)
-
-| # | Detected type | Offset | Magic bytes | Expected extensions | Executable |
-| --: | --- | --: | --- | --- | :-: |
-| 1 | PDF document | 0 | `25 50 44 46 2D` (`%PDF-`) | pdf | |
-| 2 | PNG image | 0 | `89 50 4E 47 0D 0A 1A 0A` | png | |
-| 3 | JPEG image | 0 | `FF D8 FF` | jpg jpeg jpe jfif | |
-| 4 | GIF image | 0 | `47 49 46 38` (`GIF8`) | gif | |
-| 5 | ZIP / Office Open XML | 0 | `50 4B 03 04` (`PK..`) | zip docx xlsx pptx odt ods jar apk epub | |
-| 6 | OLE2 (legacy Office, MSG) | 0 | `D0 CF 11 E0 A1 B1 1A E1` | doc xls ppt msg | |
-| 7 | Windows executable (PE) | 0 | `4D 5A` (`MZ`) | exe dll sys scr com efi | yes |
-| 8 | Linux executable (ELF) | 0 | `7F 45 4C 46` | so bin elf o | yes |
-| 9 | SQLite database | 0 | `SQLite format 3` + `00` | db sqlite sqlite3 | |
-| 10 | 7-Zip archive | 0 | `37 7A BC AF 27 1C` | 7z | |
-| 11 | RAR archive | 0 | `52 61 72 21 1A 07` | rar | |
-| 12 | GZIP archive | 0 | `1F 8B` | gz tgz | |
-| 13 | Windows event log (EVTX) | 0 | `ElfFile` + `00` | evtx | |
-| 14 | Windows registry hive | 0 | `72 65 67 66` (`regf`) | dat hve | |
-| 15 | MP4 / QuickTime video | 4 | `66 74 79 70` (`ftyp`) | mp4 m4v mov m4a 3gp heic | |
-
-### Annotated example: `examples/sample/evidence/foto-vacaciones.jpg` (112 bytes)
+Annotated from `examples/sample/evidence/edited-incremental.pdf` (offsets are real):
 
 ```text
-offset  bytes                                            text
-     0  25 50 44 46 2D 31 2E 34 0A 25 20 73 61 6D 70 6C  %PDF-1.4.% sampl   ◄ bytes 0–4 = signature #1 "PDF document"
-    16  65 3A 20 61 20 50 44 46 20 72 65 6E 61 6D 65 64  e: a PDF renamed
-    32  20 61 73 20 61 20 70 68 6F 74 6F 0A 31 20 30 20   as a photo.1 0
-   ...
-    96  20 31 20 30 20 52 20 3E 3E 0A 25 25 45 4F 46 0A   1 0 R >>.%%EOF.
-name "foto-vacaciones.jpg" → extension "jpg" (lower-cased text after the last dot)
-"jpg" ∉ {pdf}  and  "jpg" is a known extension (signature #3)  → EXTENSION_MISMATCH (medium)
-                                                                 detected = "PDF document", extension = "jpg"
+offset  bytes                                                 revision
+     0  %PDF-1.3                                   header     ┐
+     9  %<93 8C 8B 9E> ReportLab Generated PDF …   comment    │
+    61  1 0 obj … endobj                           body       │
+   ...  2 0 obj … 8 0 obj   (8 objects)                       │ revision 1
+  1255  xref                                       xref       │ bytes 0–1645
+        0 9 / 0000000000 65535 f / 0000000061 00000 n …       │ (end_offset 1646)
+  1444  trailer << /ID […] /Info 6 0 R /Root 5 0 R /Size 9 >> │
+  1625  startxref 1255                             ─► 1255    │
+  1640  %%EOF + LF                                            ┘
+  1646  4 0 obj  page: /Contents 9 0 R  (changed)  body       ┐
+  1855  6 0 obj  Info: /Producer (Foxit PDF Editor…) (changed)│ revision 2
+  2155  9 0 obj  stream "Amount due: EUR 7,250.00" (added)    │ bytes 1646–2620
+  2389  xref  4 1 · 6 1 · 9 1                      xref       │
+  2466  trailer << … /Prev 1255 >>                 ─► rev 1   │
+  2600  startxref 2389                                        │
+  2615  %%EOF + LF                                            ┘
+  2621  4 0 obj, 6 0 obj (changed); 10 0 obj font             ┐
+        /Courier-Bold, 11 0 obj stream "PAID" (added)         │ revision 3
+  3360  xref · 3458 trailer << … /Prev 2389 >>                │ bytes 2621–3612
+  3592  startxref 3360 · 3607 %%EOF + LF                      ┘
 ```
 
-### Decision ([analyzer.rs](../src/core/src/analyzer.rs) `analyze`)
+ISO 32000-1:2008 §7.5.6 (incremental updates) requires an update to append new or changed objects, a new
+cross-reference section and a trailer whose `/Prev` points to the previous section, followed by `startxref` and
+`%%EOF`. Earlier bytes are left as they were — which is what makes revision extraction possible.
+
+### How revisions are found
+
+The tool does **not** follow the `/Prev` chain to find revisions (a forged or broken chain would hide some). It
+splits the file at every `%%EOF` marker found by a linear scan **outside objects**, then cross-checks each
+revision's own `startxref`, xref and trailer (`doc.rs` `scan`, `build_revisions`).
 
 ```mermaid
 flowchart TB
-    S["name, size, first 4 KiB"] --> Z{"size = 0?"}
-    Z -->|yes| E0["EMPTY_FILE (info)"]
-    S --> D{"a signature matches<br/>at its offset?"}
-    D -->|no| U["detected_type = unknown<br/>no type finding"]
-    D -->|yes| X{"file name has<br/>an extension?"}
-    X -->|no| N["no finding"]
-    X -->|yes| L{"extension in the<br/>signature's list?"}
-    L -->|yes| N
-    L -->|no| P{"executable<br/>signature?"}
-    P -->|yes| H["EXECUTABLE_CONTENT (high)"]
-    P -->|no| K{"extension known to any signature<br/>or txt csv log xml json html?"}
-    K -->|yes| M["EXTENSION_MISMATCH (medium)"]
-    K -->|no| N
+    A["Linear scan of all bytes"] --> B{"token at position"}
+    B -->|"N G obj"| C["parse the whole object<br/>(streams end at endstream)<br/>skip past it"]
+    B -->|"%%EOF"| D["record marker<br/>end = after optional spaces + CRLF / CR / LF"]
+    B -->|"startxref N"| E["record value"]
+    B -->|"other % comment"| F["skip to end of line"]
+    C & D & E & F --> B
+    D --> G["revision k = bytes from end of k-1 to end of marker k"]
+    G --> H{"first object /Linearized<br/>and rev 1 startxref = 0?"}
+    H -->|yes| I["merge rev 1 into rev 2 (warning)"]
+    H -->|no| J["keep"]
 ```
 
-Consequences that matter in court (all from the code, all tested or testable with the samples):
+Details that matter in court:
 
-- A program **without an extension** (`invoice`) or with an unlisted one (`notes.md`) gets no finding: the
-  comparison needs an extension, and non-executable mismatches need a known or text extension.
-- The PE test is only 2 bytes (`MZ`) and GZIP only 2 bytes (`1F 8B`): a text file `notes.txt` that begins with
-  `MZ` is reported as `EXECUTABLE_CONTENT` (false positive). Confirm with a PE parser before relying on it.
-- Containers are typed by their outer signature: a `.docx` and a `.jar` are both "ZIP / Office Open XML", so a
-  `.jar` renamed `.docx` gives no finding. HEIC and MP4 share `ftyp`.
-- Matching is on the content's first bytes only; the extension is case-insensitive (`.JPG` = `.jpg`).
-- No error rates have been measured on a labelled corpus ([admissibility.md](admissibility.md#consolidated-gap-list), G5).
+- A `%%EOF` inside a stream or string is not a marker: complete objects are skipped by the scan.
+- With more than 2000 markers, the first 1999 are kept and the rest are merged into the last revision (warning).
+- Each revision's `startxref` is the **last** `startxref` keyword between its start and its `%%EOF`.
+- Linearized files ("fast web view") end their first-page section with `startxref 0` + `%%EOF`; that is not an
+  edit, so it is merged into revision 1 (ISO 32000-1 Annex F).
+- When the parser finds no `%%EOF` at all, the core falls back to a plain byte search for `%%EOF`
+  (`revision_source: "eof_scan"` in the technical report, `pdfscan.rs`).
 
-## B5 Duplicate detection by digest
+### Cross-reference resolution per revision
+
+```mermaid
+stateDiagram-v2
+    [*] --> CheckStartxref
+    CheckStartxref --> ReadSection: points at "xref" or "N G obj" inside the revision
+    CheckStartxref --> SearchRevision: missing, outside, or wrong target
+    SearchRevision --> ReadSection: last xref keyword or /Type /XRef stream in the revision
+    SearchRevision --> ScanSection: none found
+    ReadSection --> Hybrid: table trailer has /XRefStm
+    ReadSection --> VerifyEntries: table or stream
+    Hybrid --> VerifyEntries: merge stream entries into free / missing slots
+    ReadSection --> ScanSection: section cannot be parsed
+    ScanSection --> [*]: xref_kind none, objects from the scan, inconsistent
+    VerifyEntries --> [*]: consistent if every entry points at its object
+```
+
+- **Table** entries are `offset gen n|f`; **stream** entries are decoded with `/W` (3 fields, ≤ 8 bytes each)
+  and `/Index` (default `[0 /Size]`); types 0 free, 1 in use, 2 compressed (in an object stream); other types are
+  ignored (ISO 32000-1 §7.5.8.3).
+- **Consistency** (`xref_consistent`, finding `XREF_OFFSETS_INCONSISTENT`): every in-use entry (object ≠ 0) must
+  be inside the revision and point, after at most 4 whitespace bytes, at `num gen obj` with the same numbers;
+  every compressed entry must name an object stream whose index holds that object number (not checked for
+  encrypted files); `startxref` must point at a section. The first 20 bad entries are listed in the warnings
+  with their offsets.
+- **Not silently repaired**: when an xref offset is wrong, the object is taken from the scan (last copy of that
+  number/generation before the end of the revision) and a warning names both offsets.
+- `/Prev` that does not point at the previous revision's section, a missing `/Prev`, or a trailer without
+  `/Root`, `/Info`, `/Encrypt` (inherited from the previous revision) produce **warnings**, not findings.
+- **Hybrid** files (table + `/XRefStm`, ISO 32000-1 §7.5.8.4) are reported as `HYBRID_XREF` because readers that
+  ignore `/XRefStm` and readers that use it can see different objects; conflicting entries are warned.
+- **Where the warnings are.** The PDF layer returns them as `PdfReport.warnings` (byte offset + message, at most
+  500, then one "further warnings suppressed" entry; duplicates removed). The core writes the complete list to
+  `warnings.json` in the item folder (kind `parser_warnings`, schema `rakvor.pdf-warnings/1`: `count`,
+  `parser_cap`, `parser_cap_reached`, `warnings[]`), which is hashed and audited (`output_written`) like every
+  output. `technical.json` → `pdf.warnings` holds the count, the first 100 rows and the file name; the technical
+  HTML/PDF report prints the same 100 rows (byte offset, message) and says how many more are in `warnings.json`.
+
+## B5 Revision extraction (byte-exact prefixes)
 
 ```text
-duplicate_groups(items)                                     src/core/src/report/mod.rs
-  key = primary digest (first selected algorithm)
-  only items that were hashed (no UNREADABLE) and have size > 0 (empty files are all identical)
-  groups = items sharing a key, if 2 or more            → audit: duplicate_group {algorithm, hash, items}
-  each member gets DUPLICATE (info) {algorithm, count, others}, others capped at 10 names + "… (+N)"
+revision_bytes(k) = file[0 .. end_offset(k)]        (src/pdf/src/lib.rs)
+end_offset(k)     = one past the end-of-line that follows the k-th %%EOF
 ```
 
-Two different files with the same SHA-256 would require a collision; no SHA-256 collision is publicly known, and
-the generic birthday bound for 256-bit digests is about 2¹²⁸ operations. With `md5` or `sha1` as the primary,
-deliberately colliding files can be produced (B3), so a duplicate group computed on MD5 alone proves less. The
-complete groups (paths, not only names) are in `statistics.json` and `hashes.csv`.
-<!-- /forge:domain -->
+Written as `revisions/rev-NN.pdf` only when the file has more than one revision and `--revisions extract`
+(default). Each file is hashed with the run's algorithms and logged as `output_written`.
 
-## B6 The audit hash chain
+**Why this is sound.** Under ISO 32000-1 §7.5.6 an incremental update never modifies earlier bytes, so the prefix
+up to revision *k*'s `%%EOF` is exactly the file a reader would have received at that time — *if* the file was
+only appended to. If someone rewrote earlier bytes, the prefix still equals the current bytes (not history), and
+other signals usually show it (inconsistent xref offsets, broken signature digests).
 
-Each line of `audit.jsonl` is one JSON object: `seq`, `ts_utc`, `run_id`, `actor`, `action`, optional `item`,
-`details`, `prev_entry_hash`, `entry_hash` ([audit.rs](../src/core/src/audit.rs)). `audit.log` is a readable copy of
-the same actions; it is not chained and not authoritative.
+**Reproduce it independently** (sample values):
 
-```text
-canonical(e)      = JSON of e without "entry_hash"; keys sorted at every level; no whitespace; UTF-8,
-                    non-ASCII not escaped; integers only
-                    (Python: json.dumps(e, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
-entry_hash_n      = SHA-256( canonical(e_n) )                 hex, lower case
-prev_entry_hash_1 = 64 × "0";   prev_entry_hash_n = entry_hash_(n-1);   seq_n = n
+```bash
+head -c 1646 edited-incremental.pdf | sha256sum   # 48d340c09a7c6d8cfd3a6f963f56272366b26d3e983d6c1e7a5cce06fa29caa1
+head -c 2621 edited-incremental.pdf | sha256sum   # 2fd584534f39164bedfc6cdbfd9b5ed2622724f16e4da40d9481917a88046943
 ```
 
-**Worked example** (computed for this page with the rule above; `rv-imgauth verify-log` accepts these three lines):
-
-```text
-#1 canonical (287 bytes)
-{"action":"run_started","actor":"Ana Ruiz","details":{"algorithms":["sha256","md5"],"tool":"rv-imgauth",
-"version":"0.1.0"},"prev_entry_hash":"0000000000000000000000000000000000000000000000000000000000000000",
-"run_id":"20261021T152805Z-e8fd7a","seq":1,"ts_utc":"2026-10-21T15:28:05.817Z"}
-   entry_hash = 6db9fbe2ebb025947fc663b32c09cab8d2ed072e7ae5d7ec3250671c34ee71c9
-
-#2 canonical (245 bytes)
-{"action":"inputs_resolved","actor":"Ana Ruiz","details":{"bytes":234,"items":3},
-"prev_entry_hash":"6db9fbe2…34ee71c9","run_id":"20261021T152805Z-e8fd7a","seq":2,"ts_utc":"2026-10-21T15:28:05.819Z"}
-   entry_hash = 4c78f96cb3e945d2705676d5bafa1942cad3146342a9fff9bf94e89f905754aa
-
-#3 canonical (381 bytes)
-{"action":"item_hashed","actor":"Ana Ruiz","details":{"bytes_read":61,"hashes":{"sha256":"80e089ad…183c3c"},
-"index":2,"mtime_unchanged":true},"item":"D:\\ev\\acta.txt","prev_entry_hash":"4c78f96c…905754aa", …,"seq":3,…}
-   entry_hash = 558b0ea25f29bcc8af1cbbcbbc191d1511ad8d040fffea1db6d1a79f76376223
-
-#2 edited ("items":2) → f6a7e0fc0991175781ba340d8a338b11060c28db304e3e33bcf12f3e30a04264 ≠ stored
+```powershell
+$b = [IO.File]::ReadAllBytes("edited-incremental.pdf")
+$s = [Security.Cryptography.SHA256]::Create()
+-join ($s.ComputeHash($b, 0, 2621) | ForEach-Object { $_.ToString("x2") })   # 2fd58453…
 ```
 
-What `verify-log` prints for the three variants (real output):
+Both values equal the SHA-256 recorded in the audit log for `revisions/rev-01.pdf` and `rev-02.pdf`.
 
-```text
-original           OK  3 entries, chain intact: ./audit.jsonl                                        exit 0
-#2 edited          BROKEN  - line 2: entry_hash does not match its content (edited entry)            exit 3
-#2 deleted         BROKEN  - line 2: sequence 3 where 2 was expected (deleted or re-ordered entry)
-                           - line 2: prev_entry_hash does not link to the previous entry             exit 3
-#3 removed (end)   OK  2 entries, chain intact                                                       exit 0
-                       truncation not detectable without a timestamp or case record
+## B6 What changed in each revision
+
+For revision *k* ≥ 2, only the object numbers listed in **its own** xref section are examined
+(`analysis.rs` `delta`):
+
+| Entry in revision *k* | Seen in revision *k−1* | Classified as |
+| --- | --- | --- |
+| in use | absent | `objects_added` |
+| in use | present, other generation or other content | `objects_changed` (streams compared by dictionary without `/Length` + raw bytes) |
+| in use | present, same content | not counted (re-listed only) |
+| free | present | `objects_deleted` |
+
+**Pages changed** (`pages_changed`): for every page index *i*, a deep 64-bit signature of its `/Contents` and
+`/Resources` is compared with page *i* of revision *k−1* (`pages.rs`
+`page_signature`). The signature follows references (a reference hashes like its target, so moving an object
+between direct and indirect form is not a change), skips `/Parent` and `/Length`, and stops at depth 12. It uses
+Rust's `DefaultHasher` (SipHash, 64 bits): not cryptographic, used only inside one run, chance of an accidental
+match ≈ 2⁻⁶⁴ per page. Annotations (`/Annots`) are **not** part of the page signature; they are classified below
+and rendered by the visual diff. Pages beyond the previous page count count as changed.
+
+**Change kinds** (`change_kind`, used for DocMDP and `CONTENT_CHANGED_AFTER_SIGNATURE`):
+
+```mermaid
+flowchart TB
+    O["added / changed object"] --> M{"Info dict or<br/>catalog /Metadata?"}
+    M -->|yes| KM["metadata"]
+    M -->|no| N{"/Annots or /Fields array,<br/>XRef / ObjStm stream,<br/>AcroForm DR resources?"}
+    N -->|yes| NE["neutral"]
+    N -->|no| S{"/ByteRange + /Contents,<br/>or DSS data?"}
+    S -->|yes| KS["signature"]
+    S -->|no| C{"catalog, AcroForm<br/>or page?"}
+    C -->|"only allowed keys changed"| NE
+    C -->|"other keys"| KO["other"]
+    C -->|no| W{"widget / field?"}
+    W -->|"only V AS AP M MK changed"| KF["form_fill"]
+    W -->|"Sig field"| KS
+    W -->|"annotation"| KA["annotations"]
+    W -->|"none of these"| D["deferred: kind of the annotation<br/>whose appearance reaches it, else other"]
 ```
 
-The last variant is why `verify-log` also compares the end of the log with records kept outside it (next
-paragraphs): on a standalone log with no timestamp it can only say so.
+Allowed key sets: catalog → `/AcroForm /Perms /DSS /Metadata /Extensions`; AcroForm →
+`/Fields /SigFlags /DR /DA /NeedAppearances`; page → `/Annots` only (and removing an annotation is
+`annotations`). Any deleted object adds `other`. The classification is heuristic (this is stated in the
+`DOCMDP_VIOLATION` wording).
+
+## B7 Metadata and dates
+
+Sources per revision: the trailer's `/Info` dictionary (`Producer`, `Creator`, `CreationDate`, `ModDate`, …) and
+the catalog's XMP `/Metadata` stream (`pdf:Producer`, `xmp:CreatorTool`, `xmp:CreateDate`, `xmp:ModifyDate`,
+`xmp:MetadataDate`, `xmpMM:DocumentID/InstanceID`, `xmpMM:History`), parsed by a bounded XML reader
+(`meta.rs`).
+
+**Date grammar.** PDF: `D:YYYYMMDDHHmmSSOHH'mm'` with every field after the year optional (ISO 32000-1 §7.9.4).
+XMP: ISO 8601 subset `YYYY[-MM[-DD[Thh:mm[:ss[.s+]][TZD]]]]`. Invalid calendar values reject the date. A date
+without a zone is kept with `tz_missing: true` and treated as UTC for arithmetic. Two dates are the **same
+instant** when equal at the coarser precision of the two; date-only values compare the written dates; when one
+zone is missing, either the wall clocks or the instants may match.
+
+| Finding | Rule (code) | Severity |
+| --- | --- | --- |
+| `METADATA_INFO_XMP_MISMATCH` | Final revision only: Producer ≠ `pdf:Producer` or Creator ≠ `xmp:CreatorTool` (trimmed strings); CreationDate / ModDate ≠ `xmp:CreateDate` / `xmp:ModifyDate` (same-instant rule) | medium |
+| `MODDATE_BEFORE_CREATIONDATE` | In any revision, Info ModDate < CreationDate, or XMP ModifyDate < CreateDate (each pair reported once) | high |
+| `REVISION_TIME_GAP` | Consecutive revisions dated ≥ 3600 s apart; date = Info ModDate, else XMP ModifyDate, else (revision 1 only) CreationDate | info |
+| `PRODUCER_CHANGED_BETWEEN_REVISIONS` | Info Producer of revision *k* ≠ that of *k−1* (exact string) | medium |
+| `REVISION_DATE_NOT_MONOTONIC` | Revision *k* dated **earlier** than revision *k−1* (same date rule as `REVISION_TIME_GAP`; equal dates give nothing). An incremental update is appended after its predecessor, so its save date should not go back in time | medium |
+
+The GUI timeline also shows such a negative interval in red, and the revision table of the technical report gives
+both dates.
+
+## B8 Producer and editor fingerprints
+
+**Database format** ([fingerprints/starter.json](../fingerprints/starter.json)): `{name, version, entries[]}`; each
+entry has `id`, `label`, `category` (office, pdf_library, scanner, pdf_editor, online_editor, unlocker,
+printer_driver, browser), `producer_contains[]`, `creator_contains[]`, optional structural `traits{}` and a
+`source` (vendor documentation, or "generated by Rakvor on <date> with <tool version>").
+
+**Matching** (`fingerprint.rs` `match_all`):
 
 ```mermaid
 flowchart LR
-    L["read line n<br/>(blank lines skipped)"] --> J{"valid JSON<br/>object?"}
-    J -->|no| X["broken: not JSON"]
-    J -->|yes| S{"seq = expected?"}
-    S -->|no| D["broken: deleted or re-ordered"]
+    S["per revision:<br/>Info Producer, Info Creator,<br/>XMP Producer, XMP CreatorTool"] --> C{"case-insensitive<br/>substring of an entry?"}
+    C -->|yes| M["match: db, entry, field, value"]
+    C -->|no| U["UNKNOWN_PRODUCER<br/>(producer strings only, info)"]
+    M --> T{"entry traits vs<br/>observed traits"}
+    T -->|"differ"| P["PRODUCER_STRUCTURE_MISMATCH<br/>(medium)"]
+    T -->|"agree / not observable"| N["no structure finding"]
+    M --> K{"category"}
+    K -->|pdf_editor| E["EDITOR_FINGERPRINT (medium)"]
+    K -->|"online_editor, unlocker"| O["ONLINE_EDITOR_OR_UNLOCKER (high)"]
+    K -->|"other categories"| L["listed in the technical report only"]
+    H["revision 1 header comment"] -->|"header_comment_contains trait"| M
+```
+
+Producer patterns are matched against Producer and `pdf:Producer`; creator patterns against Creator and
+`xmp:CreatorTool`. The same (database, entry, field, string) is reported once, and each finding code once per
+label. The category finding and the structure finding are independent: one match can raise both.
+
+**Observed traits** (per revision): `xref_kind` (`table`, `stream`, `hybrid`, `none`), `object_streams`
+(`yes`/`no`: compressed entries in that revision's section); for revision 1 only: `header_version`,
+`binary_comment_hex` (first ≤ 8 bytes of the comment line after `%PDF-x.y`, hex), `header_comment_contains`
+(printable text of up to 4 comment lines). A trait that cannot be observed for a revision is skipped, not failed.
+
+**Three databases**, all recorded with role, name, version, entry count and SHA-256 in `item_analyzed`:
+starter (bundled; SHA-256 of its canonical JSON), local (learned on this workstation; SHA-256 of the file),
+extra (`--fingerprints-db`; SHA-256 of the file). A database with the same name and version as one already loaded
+is used once.
+
+**Learning** (`fingerprints learn`): strings from the first revision that has a Producer/Creator, plus the traits
+`xref_kind`, `object_streams`, `binary_comment_hex`, `header_comment_contains` observed by the same parser; with
+several files, strings are united and only traits shared by **all** files are kept. Each change is appended to a
+hash-chained `fingerprints.audit.jsonl` with the database SHA-256 before and after.
+
+**Limits.** Strings are trivially forged; traits are coarse (four values) and shared by many writers; no false
+positive / false negative rates have been measured (gap G5). A match identifies software, never a person.
+
+## B9 Fonts and page content
+
+**Fonts.** Every dictionary of `/Type /Font` (or with `/BaseFont` and a font `/Subtype`) listed in any revision's
+xref section is recorded once with the revision where it first appears, its subset prefix (`ABCDEF+`) and whether
+a font file is embedded (`/FontFile`, `/FontFile2`, `/FontFile3`, Type 3 always). `FONT_ADDED_IN_LATER_REVISION`
+(medium) requires all of: first appearance in revision *k* ≥ 2; referenced from page resources of revision *k*
+(including form XObjects up to depth 3); and its base name (subset prefix removed) **not** used by any page
+resources of revision *k−1*.
+
+**Content interpreter** (`pages.rs` `Interp`) — final revision only, skipped for
+encrypted files. It tracks only what the findings need:
+
+| Operators | State kept |
+| --- | --- |
+| `q` `Q` `cm` | CTM (6-element matrix), save stack ≤ 64 |
+| `Tr` | text render mode |
+| `g` `rg` `k` `cs` `sc` `scn` | "fill is white": gray ≥ 0.99, RGB all ≥ 0.99, CMYK all ≤ 0.01 |
+| `gs` | ExtGState `/ca` ≤ 0.001 (fully transparent fill) |
+| `Tj` `'` `"` `TJ` | text shown (a string with a byte other than space or NUL) |
+| `Do` (Image), inline `BI … ID … EI` | image coverage |
+| `Do` (Form) | recurse into the form (≤ 4 levels, loops detected) |
+
+- **Invisible** text show: render mode 3 or 7, or a filling mode (0, 4) with white or fully transparent fill
+  → `INVISIBLE_TEXT` (medium, one finding per page, ≤ 100). White text on a dark background is not recognised as
+  visible: that is a stated false positive.
+- **Image coverage**: the unit square transformed by the CTM, its bounding box clipped to the MediaBox, divided by
+  the MediaBox area. Coverage ≥ 0.5 and text → `TEXT_OVER_SCANNED_IMAGE` (medium, with the first revision in which
+  that page index had text); coverage ≥ 0.5 and no text → `SCANNED_PAGES_STRUCTURE_ONLY` (info).
+- A shared budget of 50 000 000 operators per file stops pathological content (warning).
+
+## B10 Digital signatures and DocMDP
+
+### ByteRange
+
+A PDF signature dictionary holds `/ByteRange [a b c d]` and `/Contents <hex CMS>`. The signed bytes are
+`file[a .. a+b] ‖ file[c .. c+d]`; the gap `[a+b, c)` is the `/Contents` string itself (ISO 32000-1 §12.8.1).
+
+![ByteRange of the signature in signed-then-modified.pdf](images/theory/byterange-signed-then-modified.svg)
+
+```text
+signed-then-modified.pdf (11 980 bytes)   /ByteRange [0 2119 10313 662]
+0          2119                  10313      10975        11980
+├─ signed ─┤<── /Contents hex ──>├─ signed ─┤── rev 3 ───┤
+   part 1      (gap = CMS)          part 2    not covered
+end of revision 2 = 10313 + 662 = 10975 → the signature covers revision 2 exactly
+```
+
+### Checks (`analysis.rs`, `sig.rs`)
+
+```mermaid
+flowchart TB
+    S["signature dictionary<br/>/ByteRange + /Contents string"] --> R{"4 values, a = 0,<br/>a+b ≤ c?"}
+    R -->|no| F1["byterange_not_at_revision_end"]
+    R -->|yes| E{"c + d = end of a revision<br/>(after EOL or right after %%EOF)?"}
+    E -->|no| F1
+    E -->|yes| G{"gap = exactly the<br/>/Contents token?"}
+    G -->|no| F2["byterange_gap_not_contents"]
+    G -->|yes| C{"SubFilter adbe.pkcs7.detached<br/>or ETSI.CAdES.detached?"}
+    C -->|no| NC["digest / signature: not checked"]
+    C -->|yes| D["messageDigest attribute =<br/>SHA-2 of signed bytes?"]
+    D -->|no| F3["digest_mismatch"]
+    D --> V["RSA PKCS#1 v1.5 over DER SET<br/>of signed attributes"]
+    V -->|fails| F4["signature_invalid"]
+```
+
+- Any of `F1`–`F4` → `SIGNATURE_INTEGRITY_FAILED` (high) with the reasons. Every signature also gets
+  `SIGNATURE_PRESENT_TRUST_NOT_VERIFIED` (info).
+- Supported: digests SHA-256/384/512; signature algorithms `rsaEncryption`, `sha256/384/512WithRSAEncryption`
+  (PKCS #1 v1.5, RFC 8017). **Not checked** (value `null`, warning in the report): SHA-1, ECDSA, RSASSA-PSS, other
+  SubFilters (`adbe.pkcs7.sha1`, `adbe.x509.rsa_sha1`), or no signer certificate in the CMS. "Not checked" is not
+  "valid".
+- The signer is found by issuer + serial or subject key identifier; if not found and the CMS holds exactly one
+  certificate, that one is used. Signing time comes from the CMS `signingTime` attribute, else `/M`.
+- **Not validated**: certificate chain, trust lists (EU Trusted List, Colombian ECD roots), revocation, embedded
+  signature timestamps, LTV data. ADR 0001 scopes v1 to cryptographic integrity; trust is "not proven".
+
+### Revisions after signing
+
+`later_revisions` = every revision after the signed one. `CONTENT_CHANGED_AFTER_SIGNATURE` (high) is raised when a
+later revision has change kind `other` **or** changed pages. Form filling, annotations, metadata and new
+signatures alone do not raise it (they may still breach DocMDP).
+
+### DocMDP
+
+The certification level *P* comes from the catalog `/Perms /DocMDP` reference to this signature (any revision
+from the signed one on) or from the signature's `/Reference` transform with `TransformMethod /DocMDP`; a
+certifying signature without `/P` is level 2 (ISO 32000-1 §12.8.2.2).
+
+| *P* | Change kinds allowed after the signature (code) | ISO 32000-1 §12.8.2.2 meaning |
+| :-: | --- | --- |
+| 1 | `metadata`; `signature` only if every signature added in that revision is a `/DocTimeStamp` | no changes |
+| 2 | `metadata`, `signature`, `form_fill` | form filling, page templates, signing |
+| 3 | `metadata`, `signature`, `form_fill`, `annotations` | also annotation creation, deletion, modification |
+
+`other` always violates → `DOCMDP_VIOLATION` (high). Known limitation: under *P* = 1 a revision that adds only
+DSS validation data (classified `signature`) without a document timestamp is reported as a violation; whether
+ISO 32000-2 / PAdES treat that as permitted is to be verified against the standard text, and the examiner should
+check such a case by hand. The attacks this detects are documented by Mladenov et al. (2019) and Rohlmann et al.
+(2021), see [B18](#b18-references).
+
+## B11 Active content, attachments and images
+
+| Signal | Rule | Output |
+| --- | --- | --- |
+| `JAVASCRIPT_PRESENT` (medium) | any object (any revision, each physical object once) with `/S /JavaScript`, a `/JS` key, a `/JavaScript` key at top level without `/Type`, or catalog `/Names /JavaScript`; up to 20 objects listed | finding |
+| `LAUNCH_ACTION` (high) | `/S /Launch` anywhere | finding |
+| `EMBEDDED_FILES` (low) | file specifications with `/EF`, plus `/Type /EmbeddedFile` streams not reached that way | finding + `embedded/NN-<name>.bin` |
+| Images | every `/Subtype /Image` stream (`--extract-embedded on`) | `embedded/NN-image-<num>-<gen>.jpg` or `.bin` |
+
+Extraction writes the **stored** bytes (`.jpg` when the only filter is `DCTDecode`, else `.bin`) and, when the
+first filter is `FlateDecode`, an `.inflated.*` copy if it decodes to ≤ 256 MiB. At most 1000 files per item;
+names are sanitised (letters, digits, `.`, `-`, `_`; ≤ 60 characters); nothing is overwritten.
+
+## B12 Visual diff: rendering, pixel comparison and boxes
+
+```mermaid
+flowchart LR
+    A["rev k−1 bytes<br/>rev k bytes"] --> B["PDFium chromium/7881<br/>CPU, white background,<br/>forms + annotations drawn"]
+    B --> C["pages 1..min(pages, max_pages)<br/>at --dpi (110)"]
+    C --> D["per pixel: any channel<br/>differs by > 32 / 255"]
+    D --> E["8 × 8 px cells:<br/>count + tight bounds"]
+    E --> F["connect cells within<br/>2 cells (Chebyshev)"]
+    F --> G["drop regions<br/>with < 3 changed px"]
+    G --> H["pad 4 px, merge boxes<br/>that touch, until stable"]
+    H --> I["≤ 100 boxes (largest kept)<br/>ratio in ppm"]
+    I --> J[["visual/rev-AA-vs-BB-page-PPP.png<br/>+ VISUAL_CHANGE_BETWEEN_REVISIONS"]]
+```
+
+**Rendering** (`render/src/lib.rs`). PDFium is bound at run time from `RV_PDFIUM_PATH`
+or the executable's folder (and its parent); the current working directory is never searched (DLL planting next
+to evidence). No password is tried. DPI is clamped to 18–600 (the CLI accepts 36–600); if a page would exceed
+40 000 000 pixels or 20 000 pixels per side, the DPI is multiplied by ¾ until it fits. PDFium's output is
+composited over white. Same PDFium build + same bytes + same DPI → same pixels.
+
+**Comparison** (`render/src/image.rs` `diff`). The canvas is the larger width and
+height of the two renders; outside a render the canvas is white (top-left aligned), and a size change alone marks
+the page as changed.
+
+Grid connectivity: with cell = 8 and merge gap = 12, cells are connected when their indices differ by at most
+`1 + ⌊12 / 8⌋ = 2` in x and y. Two changed pixels end up in one region when the blank space between their cells
+is at most one cell, i.e. a gap of roughly 9 to 23 px depending on where they fall in their cells. Example on the
+8-px grid (`#` = cell with changed pixels):
+
+```text
+cells:  0  1  2  3  4  5  6  7
+row 0   #  .  #  .  .  .  #  .      cells 0 and 2 → one region (distance 2)
+row 1   .  .  .  .  .  .  .  .      cell 6 → separate region (distance 4 from cell 2)
+```
+
+Worked example from the unit test `one_changed_rectangle_gives_one_padded_box`: a black 30 × 10 rectangle drawn at
+(50, 40) on a white 200 × 100 page → 300 changed pixels, one box `x 46, y 36, w 38, h 18` (4 px padding each
+side), ratio 300 / 20 000 = 15 000 ppm = `0.015000`. Anti-aliasing shades within 32 levels and a single changed
+pixel are ignored (`anti_aliasing_and_single_pixel_noise_are_ignored`).
+
+**Ratios** are integers in parts per million (`changed_ppm`) or 6-decimal strings (`0.000060` = 0.0060 %): no
+floating point enters audited JSON. The PNG shows previous | current with boxes outlined in violet **outside** the
+box on both halves, so the changed pixels stay visible, and a caption (pair, page, changed %, region count, page
+size change).
+
+**Limits.** A change smaller than about one pixel at the chosen DPI (≈ 0.23 mm at 110 DPI) can vanish; colour
+changes of ≤ 32 levels per channel are ignored; pages beyond `--max-pages` are only compared structurally
+(`pages_not_compared`); added or removed pages are listed, not drawn; content not rendered (metadata, invisible
+text) cannot appear. Every per-page measurement (status, changed pixels, `changed_ppm`, `changed_ratio`,
+effective DPI, rendered width × height, page-size change, boxes and the PNG name) is kept in `technical.json` →
+`pdf.visual.pairs[].pages[]`; the technical HTML/PDF report shows them as a *Per-page measurements* table (first
+200 rows, the rest in `technical.json`). A pair or page PDFium could not open or render is listed with its reason
+and adds the item limitation `VISUAL_DIFF_UNAVAILABLE`.
+
+## B13 Worker isolation
+
+```mermaid
+sequenceDiagram
+    participant P as parent (run.rs)
+    participant C as child process (same exe, worker mode)
+    P->>C: spawn with stdin, stdout and stderr as pipes
+    Note over P,C: limits applied before any evidence byte is read<br/>Unix RLIMIT_AS + RLIMIT_CORE = 0 (pre_exec)<br/>Windows Job Object - process memory, kill on close, die on unhandled exception
+    P->>C: stdin line RV-WORKER-GO, then EOF
+    C->>C: open evidence read-only, analyse, write only in the item folder
+    C-->>P: stdout - one JSON reply, protocol rv-imgauth-worker/1
+    P->>P: kill at timeout, stdout ≤ 64 MiB, keep last 4 KiB of stderr
+    P->>P: accept outputs that exist and stay inside the item folder
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> Running
+    Running --> Completed: exit 0 and valid reply
+    Running --> Timeout: worker_timeout_s elapsed (killed)
+    Running --> MemoryLimit: abnormal exit, stderr has "memory allocation of"
+    Running --> Crashed: other abnormal exit or signal
+    Running --> BadOutput: invalid JSON, wrong protocol, more than 64 MiB
+    Completed --> [*]: findings + outputs (unlisted files added as unlisted_output)
+    Timeout --> [*]: PARSER_FAILED reason=timeout
+    MemoryLimit --> [*]: PARSER_FAILED reason=memory_limit
+    Crashed --> [*]: PARSER_FAILED reason=crashed
+    BadOutput --> [*]: PARSER_FAILED reason=bad_output
+```
+
+Other `PARSER_FAILED` reasons: `spawn_failed`, `isolation_failed` (Job Object could not be created/assigned),
+`unreadable` (memory map failed), `panic` (in-process parser panic; the parser is designed never to panic).
+Files left by a failed worker are kept, hashed and audited as `partial_output`; they support no finding. The child
+never writes the audit log.
+
+**Network.** The worker code path has no network code: no HTTP client or socket is used by the worker, the
+analyzer, the PDF layer or the renderer (the timestamp client lives in `trust.rs`, used by the parent only; a test,
+`worker_code_path_has_no_network_code`, checks the sources and the crate manifests). On **Linux** the worker is
+also started in an empty network namespace (`unshare(CLONE_NEWNET)` in `pre_exec`, or with `CLONE_NEWUSER` where
+unprivileged user namespaces are allowed): it then has no usable network interface at all. If the kernel refuses
+both, the analysis still runs and the fallback is recorded. The parent compares the child's `/proc/<pid>/ns/net`
+with its own and writes `worker.network = {isolated, method, detail}` into the `item_analyzed` audit entry
+(`method: "linux_netns"` or `"none"`). On **Windows** a Job Object cannot block network access, so there is no
+OS-level network block for the worker (`isolated: false`, `method: "none"` is recorded); the guarantee there is
+the absence of network code, plus a firewall rule if the examiner adds one. Fault injection
+(`RV_WORKER_TEST_FAULT=crash|hang|oom`, and `RV_WORKER_TEST_NO_NETNS=1` for the namespace fallback) exists in debug
+builds only.
+
+## B14 The audit hash chain
+
+Each line of `audit.jsonl` is one JSON object: `seq`, `ts_utc`, `run_id`, `actor`, `action`, optional `item`,
+`details`, `prev_entry_hash`, `entry_hash` ([audit.rs](../src/core/src/audit.rs)).
+
+```text
+canonical(e)  = JSON of e without "entry_hash"; keys sorted at every level; no whitespace; UTF-8, non-ASCII
+                not escaped; integers only (Python: json.dumps(e, sort_keys=True, separators=(",", ":"),
+                ensure_ascii=False))
+entry_hash_n  = SHA-256( canonical(e_n) )            (hex, lower case)
+prev_entry_hash_1 = 64 × "0";  prev_entry_hash_n = entry_hash_(n-1);  seq_n = n
+```
+
+**Worked example** (computed for this page; values are real SHA-256):
+
+```text
+#1  {"action":"run_started","actor":"Ana Ruiz","details":{"tool":"rv-imgauth","version":"0.1.0"},
+     "prev_entry_hash":"0000…0000","run_id":"20261021T103903Z-67d213","seq":1,"ts_utc":"2026-10-21T10:39:03.511Z"}
+     entry_hash = 9f75ade153e1629c2bc765addd9d63ac2d494a7fc92d4e60b94180b731644995
+#2  {"action":"inputs_resolved","actor":"Ana Ruiz","details":{"bytes":105085,"items":7},
+     "prev_entry_hash":"9f75ade1…644995","run_id":"…","seq":2,"ts_utc":"2026-10-21T10:39:03.512Z"}
+     entry_hash = 0997f3dc4cbd5498c8e201ffeb2ac2dcb85d91b2dcce06957dfdad5f61b11da5
+#2 edited ("items":6) → 84db8a34a40799f0233a55a39c69e5176888fa7bf4dd065cfdbc777560d2afa2 ≠ stored → broken
+```
+
+```mermaid
+flowchart LR
+    L["read line n"] --> S{"seq = n?"}
+    S -->|no| X["broken: deleted or re-ordered"]
     S -->|yes| P{"prev_entry_hash =<br/>previous entry_hash?"}
-    P -->|no| D
+    P -->|no| X
     P -->|yes| H{"SHA-256(canonical) =<br/>stored entry_hash?"}
     H -->|no| Y["broken: edited"]
     H -->|yes| L
 ```
 
+What the chain proves and does not prove:
+
 | Proves | Does not prove, on its own |
 | --- | --- |
-| No entry was edited, inserted, deleted or reordered **before the last entry present** | That entries were not removed **from the end**: a shorter chain is still valid (see the last line above). Only an anchor outside the log shows that |
+| No entry was edited, inserted, deleted or reordered **before the last entry present** | That entries were not removed **from the end** (a shorter chain is still valid) |
 | The order of work equals the order of entries | That the whole chain was not recomputed by someone who rewrote it from scratch |
 | Report and output digests are bound to the run | When the entries were written (host clock, `ts_utc`) |
 
-External anchors close those gaps: a complete run ends with `run_finished` (or `run_failed` / `run_cancelled`);
-the case log records the run's final entry count and head ([B7](#b7-the-case-folder)); the RFC 3161 token binds
-entry *N* ([B8](#b8-rfc-3161-trusted-timestamp)); the statistics report prints the head and entry count at the
-time it was written; a signed PDF report binds that head to the examiner's key.
+External anchors close those gaps: the RFC 3161 token binds entry *N* ([B15](#b15-rfc-3161-trusted-timestamp));
+the reports print the chain head and entry count at the time they were written; a signed PDF report binds that
+head to the examiner's key; the head can also be recorded in the case management system. A complete run always
+ends with `run_finished` (or `run_failed` / `run_cancelled`).
 
-`verify-log` uses the first two automatically ([src/core/src/verify.rs](../src/core/src/verify.rs)):
+Independent check: [tests/verify_chain.py](../tests/verify_chain.py) re-implements the chain in Python and
+re-hashes the evidence listed in `hashes.csv`.
 
-| Anchor found | Check | Result line |
-| --- | --- | --- |
-| `timestamp-<K>.json` | entry `#K` exists and its hash is the token's imprint; every `timestamp_obtained` entry still has its token file | `truncation: entries up to #K are anchored by the RFC 3161 timestamp (…); n entries after it (…) cannot be proven complete` |
-| run in `<CASE>/runs/<tool>/<RUN-ID>/logs` | `run_finished` in the case log: entry `#M` = `audit_entries` exists with hash `audit_head`; only `timestamp_obtained` after it | `truncation: the final entry #M is anchored by the case log (run_finished)` |
-| neither | — | `truncation not detectable without a timestamp or case record` |
-
-A log that ends before `#K` or `#M` is reported as `truncated: …` (exit 3). The highest anchor wins; when it is
-the final entry, the log is complete as far as anything outside it can tell.
-
-Independent check: [tests/verify_chain.py](../tests/verify_chain.py) re-implements the chain in Python (standard
-library) and re-hashes the evidence listed in `hashes.csv` (it needs that file: it is a run checker, not a case-log
-checker). The append-only file is opened with `create_new` + `append`: an existing log is never overwritten; only
-the `timestamp` command re-opens a log, after verifying it.
-
-## B7 The case folder
-
-Layout and contract: [case-folder.md](case-folder.md). This section explains why the design holds.
-
-```text
-<CASE>/case.json               {"schema":"rakvor.case/1","case_id","jurisdiction","created_utc","created_by":{…}}
-<CASE>/case-log.jsonl          same chain rule as audit.jsonl; first entry case_created (carries case_json_sha256)
-<CASE>/case-log.lock           exists only while a tool appends (created with create_new, removed on drop)
-<CASE>/evidence/registry.json  {"schema":"rakvor.registry/1","items":[{evidence_id, path, size, hashes,
-                               registered_by:{tool, version, run_id, audit_seq}, registered_utc}]}
-<CASE>/evidence/registry.csv   evidence_id,path,size,<algorithms present>,run_id
-<CASE>/runs/<tool>/<RUN-ID>/{logs,reports}/
-```
-
-Real registry entry from an intake of the sample (path shortened):
-
-```json
-{
-  "evidence_id": "E0003",
-  "hashes": { "md5": "d0532b1672c85a82f561ad2de7e9a57a",
-              "sha256": "42503ebb0f9892b30b72e11cfa0cbf5bcb5d60f667d611fa9598c9b4e835c643" },
-  "path": "D:\\export\\foto-vacaciones.jpg",
-  "registered_by": { "audit_seq": 12, "run_id": "20261021T152805Z-e8fd7a", "tool": "rv-imgauth", "version": "0.1.0" },
-  "registered_utc": "2026-10-21T15:28:05.909Z",
-  "size": 112
-}
-```
-
-`registered_by.audit_seq` = 12 points at the `item_hashed` entry of that run's `audit.jsonl` that holds the same
-digests, so every registry row can be traced to a sealed log entry.
-
-### Rules
-
-| Rule | Code | Why |
-| --- | --- | --- |
-| A broken case is never extended | every append re-runs `verify_log_and_registry` under the lock: case-log chain, first entry `case_created`, `case.json` digest, registry digest = last `registry_sha256` in the log | a tool cannot silently build on an edited case |
-| One writer at a time | `case-log.lock` created exclusively; wait ≤ 30 s; a lock older than 600 s is reported as stale and **never deleted automatically** | two tools never interleave entries |
-| Only the intake role writes the registry | `register` (intake); analysis tools only read it | the reference values cannot drift |
-| Paths are compared normalised | `normalize_path`: absolute, lexically normalised (`.`/`..` removed); `same_path`: case-insensitive on Windows (`to_lowercase`), exact elsewhere | the same file is found again by path; `D:\Evidence\a.pdf` = `d:\evidence\A.PDF` on Windows |
-| A case run always shares an algorithm with the registry | `ensure_case_algorithm`: if the selection is disjoint from the algorithms present in **every** registered item, add SHA-256 (or the registry's first algorithm), replacing the second choice if two were selected; audited as `case_algorithm_added` | comparison is always possible |
-| Evidence ids are never reused | next id = highest number + 1; same path **and** same content keeps its id | an id means one content forever |
-
-### Matching an item against the registry (analysis role)
-
-```mermaid
-stateDiagram-v2
-    [*] --> ById: item selected with --evidence
-    [*] --> ByPath: other items
-    ById --> Compare: registry entry of that id
-    ByPath --> Compare: latest entry with the same normalised path
-    ByPath --> ByContent: no entry with that path
-    ByContent --> Compare: first entry whose common digests match
-    ByContent --> NotRegistered: none
-    Compare --> Verified: every common algorithm equal
-    Compare --> Mismatch: one algorithm differs (or none in common)
-    Verified --> [*]: evidence_verified_against_case match true
-    Mismatch --> [*]: EVIDENCE_HASH_MISMATCH_WITH_CASE (high), analysis continues
-    NotRegistered --> [*]: EVIDENCE_NOT_IN_CASE_REGISTRY (medium)
-```
-
-<!-- forge:domain -->
-This tool is the **intake** role (`CASE_ROLE = Intake`): it does not run the matching above. It registers every
-item that was hashed: same path and same content keeps the existing id (`already_registered`); a registered path
-with other content gets a **new** id and the finding `REGISTRY_PATH_CONTENT_CHANGED` (medium); anything else gets
-a new id. Unreadable items are not registered. The analysis matching is in the same code and runs in every tool
-scaffolded from this one.
-<!-- /forge:domain -->
-
-### Cross-linking of the two chains
+## B15 RFC 3161 trusted timestamp
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant C as case-log.jsonl
-    participant A as run audit.jsonl
-    C->>C: #2 run_started {run_dir, role}  entry_hash 57d5208e…a6a0
-    A->>A: #1 run_started
-    A->>A: #2 case_linked {case_log_seq_at_start 2, case_log_head_at_start 57d5208e…a6a0, registry_sha256}
-    C->>C: #3 evidence_registered {added E0001–E0003, registry_sha256 60c195b9…199c}
-    A->>A: #14–#16 evidence_registered {evidence_id, case_log_seq 3, registry_sha256}
-    A->>A: #23 run_finished  entry_hash 92040a6e…ea62
-    C->>C: #4 run_finished {audit_entries 23, audit_head 92040a6e…ea62}
-```
-
-(Values from a real intake of the sample.) `verify-case` checks, for every `run_started` in the case log: the run's
-`audit.jsonl` chain and timestamp tokens; that its `case_linked` names this case and quotes the `run_started` hash;
-and that entry `audit_entries` of the run has hash `audit_head`, with only `timestamp_obtained` allowed after it.
-It also warns about run folders the case log never announced. Editing either chain therefore breaks a link, and
-truncating a finished run's audit log is detected here (and by `verify-log` on that run, which finds the case log
-from the run folder's location, [B6](#b6-the-hash-chained-audit-log)).
-
-With `--rehash`, `verify-case` also re-hashes the evidence: every registry entry whose path is still a file is
-read once with the entry's own algorithms (at most two, standard order) and compared with the registry. A path
-registered more than once (its content changed between intakes, so it received a new id) is compared with its
-latest registration; the earlier ids are listed as superseded. A difference is a problem (exit 3); an unreachable
-or unreadable file is a warning, because evidence copies often live on another workstation.
-
-What `verify-case` does **not** do: verify TSA signatures (B8), or prove that the registry's first content equals
-the original source.
-
-## B8 RFC 3161 trusted timestamp
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant T as trust.rs
+    participant T as rv-imgauth (trust.rs)
     participant L as audit.jsonl
     participant A as TSA
-    T->>L: … last item_reports_written (entry N, entry_hash H)
-    T->>A: HTTP POST application/timestamp-query, TimeStampReq v1 {SHA-256, H}, nonce, certReq
-    A-->>T: TimeStampResp, status + token (CMS SignedData with TSTInfo)
-    T->>T: status granted? TSTInfo imprint = H? nonce echoed (when present)?
+    T->>L: … item_reports_written (entry N, entry_hash H)
+    T->>A: HTTP POST application/timestamp-query<br/>TimeStampReq v1: messageImprint {SHA-256, H}, nonce, certReq
+    A-->>T: TimeStampResp: status + token (CMS SignedData with TSTInfo)
+    T->>T: status granted? TSTInfo imprint = H? nonce echoed?
     T->>L: timestamp_obtained {covers_seq N, head H, gen_time, tsa, token_sha256}
-    T->>L: statistics_report_written, run_finished (after the token)
+    T->>L: statistics_report_written, run_finished (not covered by this token)
 ```
 
-The **message imprint is the chain head itself**: the 32 bytes of `entry_hash` of entry *N*, declared as a SHA-256
-value. It is not hashed again, so `openssl ts -verify -digest <H>` works directly. Request layout (69 bytes; head
-from the worked example of B6, example nonce):
-
-```text
-30 43                                   TimeStampReq SEQUENCE, 67 bytes
-   02 01 01                             version v1
-   30 31                                messageImprint
-      30 0D 06 09 60 86 48 01 65 03 04 02 01 05 00     hashAlgorithm sha256 (2.16.840.1.101.3.4.2.1), NULL
-      04 20 55 8B 0E A2 … 37 62 23      hashedMessage = entry_hash (32 bytes)
-   02 08 1F 3A 5C 7E 9B 2D 4F 60        nonce (8 bytes, high bit cleared: positive INTEGER)
-   01 01 FF                             certReq TRUE
-```
-
-- Nonce: first 8 bytes of SHA-256(clock, process id), high bit cleared. It detects a replayed response; it is not
-  a secret.
-- The response is limited to 1 MiB and 15 s. `TSTInfo` is read by a minimal DER walk because many TSAs write
-  fractional seconds in `genTime`, which strict decoders reject; `gen_time` is stored to the second. Example: the
-  test TSA's token said `15:30:01.367038`, the log says `2026-10-21T15:30:01Z`.
-- Stored next to the log: `timestamp-<NNNNN>.tsr` (the DER **TimeStampResp**, not only the token) and
-  `timestamp-<NNNNN>.json` (tsa, gen_time, covers_seq, head, token_sha256, file).
+- The **message imprint is the chain head itself** (the 32 bytes of `entry_hash` of entry *N*, declared as a
+  SHA-256 value), not a hash of it. So `openssl ts -verify -digest <H> …` works directly.
+- Nonce: 8 bytes derived from the clock and process id (positive), used only to detect a replayed response.
+- `genTime` is stored to the second (fractions dropped). The token is stored as `timestamp-<NNNNN>.tsr` (DER) with
+  a readable `timestamp-<NNNNN>.json`.
 - Offline → `timestamp_pending` and the run completes; `rv-imgauth timestamp <log>` later re-verifies the chain and
   appends `timestamp_obtained` for the then-current head (earlier entries are never rewritten).
-- `verify-log` and `verify-case` re-check: that entry `covers_seq` is still in the log (otherwise: `truncated`), the
-  `.tsr` SHA-256 against `token_sha256`, the TSA status, and that the imprint equals the `entry_hash` of
-  `covers_seq`. They do **not** verify the TSA's signature, certificate chain,
-  policy OID or accuracy. Do that with OpenSSL against the TSA's published chain
-  ([usage.md](usage.md#6-timestamps)) before relying on the time in court (gap G18). Real check of the test token:
-  `openssl ts -verify -digest 53b0de42…a91a61 -in timestamp-00018.tsr -CAfile ca.pem -untrusted tsa.pem` →
-  `Verification: OK`.
-- The default TSA URL is plain HTTP; integrity rests on the TSA's signature, which is why the OpenSSL check
-  matters. eIDAS qualified status depends on the TSA chosen ([admissibility.md](admissibility.md)).
+- `verify-log` re-checks: the token file's SHA-256, the TSA status, that the token's imprint equals the
+  `entry_hash` of `covers_seq`, and the **TSA's CMS signature** (RFC 3161 / RFC 5652, in
+  [trust.rs](../src/core/src/trust.rs) with the RustCrypto crates): eContentType `id-ct-TSTInfo`; exactly one
+  SignerInfo whose certificate is in the token (`certReq` is always set); signed attributes `content-type`,
+  `message-digest` = hash of the TSTInfo, ESS `signing-certificate` (v1, SHA-1) or `signing-certificate-v2`
+  (default SHA-256) equal to the hash of that certificate; the RSA PKCS#1 v1.5 signature (SHA-256/384/512; other
+  algorithms are reported as not supported and fail the check); and the `id-kp-timeStamping` extended key usage.
+  With `--tsa-ca <bundle>` the certificate chain is also validated up to a certificate of the bundle at `genTime`
+  (each signature, validity period, CA flag of issuers); without it the output says *chain not validated*.
+  Revocation (CRL/OCSP), the policy OID and the accuracy are **not** checked: for those, and as an independent
+  second tool, use OpenSSL (see [usage.md](usage.md#6-timestamps)) before relying on the time in court (G18).
+- The default TSA URL is plain HTTP; integrity rests on the TSA's signature, which is why the signature and chain
+  checks matter. eIDAS qualified status depends on the TSA chosen (see [admissibility.md](admissibility.md)).
 
 Standards: RFC 3161 (Time-Stamp Protocol), RFC 5816 (ESSCertIDv2 update), RFC 5652 (CMS).
 
-## B9 Signed PDF reports
+## B16 Signed PDF reports
 
-<!-- forge:domain -->
-Reports are written by a small built-in PDF writer ([report/pdf.rs](../src/core/src/report/pdf.rs)): PDF 1.4,
-A4, the standard Helvetica, Helvetica-Bold and Courier fonts with WinAnsiEncoding (English, Spanish and French
-characters; anything else becomes `?`), no embedded fonts, one cross-reference table, one `%%EOF`.
-<!-- /forge:domain -->
-
-With `--sign-cert`, the file is written **once** with a signature placeholder and then signed in place (no
-incremental update):
-
-```text
-technical.en.pdf of the sample (39 620 bytes), real values
-… 9 0 obj << /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached
-             /ByteRange [0 0000006359 0000039129 0000000491] /Contents <3082…000> /M (D:…) /Reason (…) >>
-  widget /FT /Sig /T (RakvorExaminerSignature), invisible, on page 1;  catalog /AcroForm /SigFlags 3
-0                  6359                                   39129              39620
-├──── signed ──────┤<── /Contents: 32 770 bytes ─────────>├──── signed ──────┤
-                     "<" + 32 768 hex digits + ">"  = room for 16 384 bytes of CMS (2 086 used here)
-```
-
-1. Write the whole PDF with `/ByteRange [0 0000000000 0000000000 0000000000]` and `/Contents <000…0>`, and keep
-   the offset at which the signature dictionary object was written (the xref offset of `9 0 obj` above).
-2. Locate both placeholders **inside that object only** — page text that happens to contain `/Contents <0000` or
-   the byte-range marker is never touched (unit test `placeholder_bytes_in_page_text_are_left_alone`) — and fill
-   the byte range with fixed-width (10-digit) numbers, so no offset moves.
-3. Sign `file[0 .. 6359] ‖ file[39129 .. 39620]` ([trust.rs](../src/core/src/trust.rs) `PdfSigner`): CMS
-   SignedData, detached, SHA-256, RSA PKCS #1 v1.5, signed attributes content-type, signing-time and
-   message-digest, certificates from the `.p12`/`.pfx`. RSA keys only.
-4. Write the DER as upper-case hex into the placeholder.
-
-Independent check of the file above with pyHanko: `INTACT:UNTRUSTED,UNTOUCHED`, coverage `ENTIRE_FILE`, digest
-SHA-256 (untrusted only because the test certificate has no trusted root). The trust test does the same on every
-signed PDF of a run ([tests/validate_pdf_signature.py](../tests/validate_pdf_signature.py), through
-`RV_TEST_PYTHON`): each must be intact and cryptographically valid; an untrusted chain is expected with the test CA.
+[report/pdf.rs](../src/core/src/report/pdf.rs) writes each report PDF with a signature dictionary
+`/Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached`, a 10-digit `/ByteRange` placeholder and a
+zero-filled `/Contents` placeholder, plus an invisible signature widget and `/SigFlags 3`. After the whole file is
+written, `/ByteRange [0 start end len−end]` is filled in and the bytes outside `/Contents` are signed
+([trust.rs](../src/core/src/trust.rs) `PdfSigner`): CMS SignedData, detached, SHA-256, RSA PKCS #1 v1.5, signed
+attributes content-type, message-digest and signing-time, certificates from the `.p12`/`.pfx`. RSA keys only.
 
 This is a plain ISO 32000-1 CMS signature. It is not a PAdES baseline signature (ETSI EN 319 142-1: SubFilter
-`ETSI.CAdES.detached` and a signing-certificate-v2 attribute), it carries no signature timestamp and no revocation
-data. Its legal weight depends on the certificate ([admissibility.md](admissibility.md), gap G3). The certificate
-subject and SHA-256 fingerprint are logged as `signing_certificate_loaded` and printed on every report (HTML, PDF,
-and `run.pdf_signer_certificate_sha256` in the JSON); the password is never logged, and the interactive prompt does
-not echo it.
+`ETSI.CAdES.detached` and a signing-certificate-v2 attribute), it carries no signature timestamp and no
+revocation data. Its legal weight depends on the certificate (see [admissibility.md](admissibility.md),
+gap G3). The certificate subject and SHA-256 fingerprint are logged as `signing_certificate_loaded`; the
+password never is.
 
-## B10 Custody forms
-
-One form per item, `custody.json` plus HTML and PDF in the jurisdiction's language and in English
-([report/mod.rs](../src/core/src/report/mod.rs) `custody_*`, [templates/custody.html](../templates/custody.html),
-[schemas/item-custody.schema.json](../schemas/item-custody.schema.json)).
-
-| Field | Colombia (`co`, Spanish) | France (`fr`, French) | Filled from |
-| --- | --- | --- | --- |
-| Title and legal basis | Ley 906 de 2004 arts. 254–266, Fiscalía manual, Ley 527 de 1999 | CPP arts. 156 ff.; seal number refers to the judicial *scellé* | i18n catalogue |
-| Case | Case number (NUNC) | Case / procedure reference | `case_id` |
-| Item code | Evidence item (EMP/EF) code | Seal number | evidence id `E0001…` in a case folder, else `<RUN-ID>-<NNNNN>` |
-| Registered at intake | date and time (UTC) | same | registry `registered_utc` (case folder only) |
-| Description, location | file name · size · detected type; path of the examined copy | same | the run |
-| Integrity values | every digest of the run | same | `item_hashed` |
-| Operations | tool, version, run id, start and end (UTC), audit entries `#first–#last` | same | the run |
-| Transfers | 6 blank rows: date and time, delivered by, received by (name, ID, signature), purpose, condition of packaging / media | same | to sign by hand |
-| Signatures | examiner, receiver | same | to sign by hand |
-
-`custody.json` lists `transfers: []`: the tool never invents a transfer; the physical chain is completed by
-people. The form is a working aid, not the official Fiscalía *Registro de Cadena de Custodia* or a French
-*scellé* record ([admissibility.md](admissibility.md#consolidated-gap-list), G9).
-
-## B11 Determinism and repeatability
+## B17 Determinism and reproducibility
 
 | Same input + same build gives the same … | Varies between runs |
 | --- | --- |
-| evidence digests, `bytes_read`, detected types, findings and their parameters | `run_id`, `ts_utc`, every `entry_hash` (they include time) |
-| item order and numbering (sorted paths), duplicate groups | absolute paths of the outputs, host, OS user (in `environment.json`) |
-| `hashes.csv` rows | report digests (reports print run id, times, the audit head); PDF `/CreationDate` |
-| evidence ids for an unchanged path and content (case folder) | the RFC 3161 token and nonce |
+| evidence digests, revision files and their digests | `run_id`, `ts_utc`, every entry_hash (they include time) |
+| findings and their parameters | absolute paths, host, OS user (recorded in `environment.json`) |
+| visual-diff PNGs (same PDFium build and DPI) | report digests (they print run id and times) |
+| `objects.json`, embedded files | the RFC 3161 token |
 
-Measured for this page: the Rust and Python builds of this tool, run on the sample with the same algorithms, gave
-identical digests, detected types and findings (compared on every `technical.json`). Item numbers are identical
-too: both profiles make each path absolute and lexically normalised and sort by that string **bytewise (UTF-8)**,
-so `a-b/x.txt` comes before `a/x.txt` ('-' 0x2D < '/' 0x2F) and `B.txt` before `a.txt`. The cross-profile test
-compares the numbering of such a folder ([input.rs](../src/core/src/input.rs) `items_are_sorted_by_normalised_path_bytes`;
-`cross_language_case_verification` with `RV_CROSS_PROJECT`), and CI verifies a case folder written by the Python
-profile ([tests/golden/](../tests/golden/regenerate.py)). File names that are not valid UTF-8 are outside this
-contract.
+`environment.json` records the tool version, `rustc` version, target triple, every dependency version from
+`Cargo.lock`, OS, host, OS user, working directory and command line. The PDFium library path, SHA-256 and pinned
+tag are recorded in each `item_analyzed` entry (`details.analysis.visual.renderer`).
 
-`environment.json` records the tool version, `rustc` version, target triple, every package and version listed in
-`Cargo.lock` (495 entries at this commit, for all platforms — not only those compiled into this binary), OS,
-host, OS user, working directory and command line (or the GUI settings), so a second examiner can rebuild the same
-version and repeat the run (ISO/IEC 27037 repeatability and reproducibility, [admissibility.md](admissibility.md#61-isoiec-270372012--identification-collection-acquisition-and-preservation-of-digital-evidence)).
-
-<!-- forge:domain -->
-## B12 What each finding does not prove
-
-| Finding (severity) | Rule (code) | Shows | Does not prove |
-| --- | --- | --- | --- |
-| `EMPTY_FILE` (info) | bytes read = 0 | The file has 0 bytes | Whether it was emptied on purpose or created empty |
-| `EXTENSION_MISMATCH` (medium) | signature found; extension not in its list; extension known or textual ([B4](#b4-type-detection-by-magic-bytes-and-extension-mismatch)) | Name and content signature disagree | An attempt to hide content; renaming is common and often innocent |
-| `EXECUTABLE_CONTENT` (high) | PE or ELF signature; extension not an executable one | A program stored under a non-program name | That the program is malicious; a 2-byte `MZ` match can be a false positive |
-| `DUPLICATE` (info) | same primary digest, size > 0 ([B5](#b5-duplicate-detection-by-digest)) | Identical content in several files | Who copied the file, when, or which copy is the original |
-| `UNREADABLE` (high) | open or read error | The OS error text | That the file is damaged; permissions and locks cause this |
-| `REGISTRY_PATH_CONTENT_CHANGED` (medium) | intake: registered path, other content | The path now holds other content (new evidence id) | Which version is the original, or why it changed |
-<!-- /forge:domain -->
-
-Case-folder findings (shared by every tool in the analysis role):
-
-| Finding (severity) | Rule (code) | Shows | Does not prove |
-| --- | --- | --- | --- |
-| `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high) | matched entry, a common algorithm differs ([B7](#matching-an-item-against-the-registry-analysis-role)) | The file examined is not bit-identical to the registered item | Who changed it, when, or whether deliberately |
-| `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium) | no entry by id, path or content | Continuity from intake cannot be shown for this file | That the file is altered or irrelevant |
-
-The exact wording printed in reports is in [i18n/en.json](../i18n/en.json) (`findings`; also es, fr); a test
-enforces the same keys in all three languages.
-
-## B13 References
+## B18 References
 
 Standards and specifications
 
-- NIST FIPS 180-4 (Secure Hash Standard, 2015); NIST FIPS 202 (SHA-3, 2015); RFC 1321 (MD5, 1992).
-- J. O'Connor, J.-P. Aumasson, S. Neves, Z. Wilcox-O'Hearn, *BLAKE3: one function, fast everywhere* (2020).
+- ISO 32000-1:2008, *Document management — Portable document format — Part 1: PDF 1.7* (§7.5 file structure,
+  §7.5.6 incremental updates, §7.5.8 cross-reference streams, §7.9.4 dates, §12.8 digital signatures, §12.8.2.2
+  DocMDP, Annex F linearized PDF). ISO 32000-2:2020 (PDF 2.0).
+- ETSI EN 319 142-1, *PAdES digital signatures — Part 1: Building blocks and PAdES baseline signatures*.
 - RFC 3161 (Time-Stamp Protocol, 2001); RFC 5816 (ESSCertIDv2 update for RFC 3161, 2010); RFC 5652
-  (Cryptographic Message Syntax, 2009); RFC 8017 (PKCS #1 v2.2, 2016); RFC 5280 (X.509 PKI profile, 2008).
-- ISO 32000-1:2008, *PDF 1.7* (§12.8 digital signatures); ETSI EN 319 142-1 (PAdES baseline signatures).
+  (Cryptographic Message Syntax, 2009); RFC 8017 (PKCS #1 v2.2, 2016); RFC 5280 (X.509 PKI profile, 2008);
+  RFC 1321 (MD5, 1992).
+- NIST FIPS 180-4 (Secure Hash Standard, 2015); NIST FIPS 202 (SHA-3, 2015).
+- J. O'Connor, J.-P. Aumasson, S. Neves, Z. Wilcox-O'Hearn, *BLAKE3: one function, fast everywhere* (2020).
 - ISO/IEC 27037:2012 (identification, collection, acquisition and preservation of digital evidence) — see
   [admissibility.md](admissibility.md) for what was verified of it.
 
@@ -782,20 +934,18 @@ Academic and practitioner literature
 - X. Wang, H. Yu, "How to Break MD5 and Other Hash Functions", EUROCRYPT 2005.
 - M. Stevens, E. Bursztein, P. Karpman, A. Albertini, Y. Markov, "The first collision for full SHA-1",
   CRYPTO 2017.
+- V. Mladenov, C. Mainka, K. Meyer zu Selhausen, M. Grothe, J. Schwenk, "1 Trillion Dollar Refund — How To
+  Spoof PDF Signatures", ACM CCS 2019 (incremental saving, signature wrapping, universal signature forgery).
+- C. Mainka, V. Mladenov, S. Rohlmann, "Shadow Attacks: Hiding and Replacing Content in Signed PDFs", NDSS 2021.
+- S. Rohlmann, V. Mladenov, C. Mainka, J. Schwenk, "Breaking the Specification: PDF Certification",
+  IEEE S&P 2021 (DocMDP / certification attacks).
+- A. Rosenfeld, J. Pfaltz, "Sequential operations in digital picture processing", JACM 13(4), 1966
+  (connected-component labelling, the basis of the region grouping).
+- Didier Stevens, *PDF Tools* (pdfid, pdf-parser) — practitioner tools for manual cross-checks of PDF structure.
 
-<!-- forge:domain -->
-- G. Kessler, *File Signatures Table* (garykessler.net) and the `file(1)` / libmagic database — practitioner
-  references for magic numbers (to be verified against the entries of [B4](#b4-type-detection-by-magic-bytes-and-extension-mismatch)).
-- Format specifications for the signatures used: ISO 32000-1 (PDF header), ISO/IEC 15948 (PNG), ITU-T T.81
-  (JPEG SOI marker), PKWARE APPNOTE (ZIP local file header), RFC 1952 (GZIP), ISO/IEC 14496-12 (`ftyp` box),
-  Microsoft PE/COFF specification (`MZ` DOS header).
-<!-- /forge:domain -->
+Independent oracles used to cross-check this tool: pikepdf/qpdf and pyHanko via
+`tests/oracle_pdf.py` (CI job `oracle`, every push); Python `hashlib`/`blake3`
+for [examples/sample/expected_hashes.csv](../examples/sample/expected_hashes.csv); OpenSSL for RFC 3161 tokens.
 
-Independent oracles used to cross-check this tool: Python `hashlib`/`blake3` for
-[examples/sample/expected_hashes.csv](../examples/sample/expected_hashes.csv) and
-[tests/verify_chain.py](../tests/verify_chain.py) (both in CI); JSON Schemas via
-[tests/validate_reports.py](../tests/validate_reports.py) (in CI); pyHanko for signed PDFs
-([tests/validate_pdf_signature.py](../tests/validate_pdf_signature.py), in CI); OpenSSL for RFC 3161 tokens
-(manual, see above); the Python profile of this tool: a committed case folder it wrote
-([tests/golden/](../tests/golden/regenerate.py), in CI) and the live cross-profile test (case folders and item
-numbering, run when `RV_CROSS_PROJECT` is set).
+Figures on this page are generated by `tests/make_theory_figures.py` from the
+synthetic samples.

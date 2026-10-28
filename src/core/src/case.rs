@@ -36,8 +36,8 @@ pub const STALE_LOCK: Duration = Duration::from_secs(600);
 /// How long a tool waits for another tool's lock before giving up.
 pub const LOCK_WAIT: Duration = Duration::from_secs(30);
 
-/// What a tool does with the case registry. The reference (rv-imgauth) is the intake tool; tools scaffolded
-/// from it are analysis tools (`CASE_ROLE` in lib.rs and `case_role` in .forge.json).
+/// What a tool does with the case registry. The forge reference (rv-hashinv) is the intake tool; tools
+/// scaffolded from it, like rv-imgauth, are analysis tools (`CASE_ROLE` in lib.rs and `case_role` in .forge.json).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CaseRole {
@@ -175,11 +175,6 @@ pub fn compare(expected: &BTreeMap<String, String>, actual: &[(HashAlgo, String)
 
 /// Absolute, lexically normalised path (no `.`/`..`), the form stored in the registry.
 pub fn normalize_path(p: &Path) -> String {
-    normalize(p).display().to_string()
-}
-
-/// [`normalize_path`] as a `PathBuf` (opens files whose names are not valid UTF-8 too).
-pub fn normalize(p: &Path) -> PathBuf {
     let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
     let mut out = PathBuf::new();
     for c in abs.components() {
@@ -191,7 +186,21 @@ pub fn normalize(p: &Path) -> PathBuf {
             other => out.push(other.as_os_str()),
         }
     }
-    out
+    out.display().to_string()
+}
+
+/// True when two registry paths (both from [`normalize_path`]) name the same file. Windows file systems are
+/// case-insensitive, so there the comparison ignores case (`C:\Case\A.pdf` = `c:\case\a.pdf`); elsewhere
+/// it is exact. The stored path keeps the spelling the intake tool saw.
+pub fn same_path(a: &str, b: &str) -> bool {
+    #[cfg(windows)]
+    {
+        a.to_lowercase() == b.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
 }
 
 /// "E0001", "E0002", … (more digits after E9999).
@@ -318,13 +327,13 @@ pub fn verify_log_and_registry(dir: &Path) -> Result<LogState, Vec<String>> {
                     CASE_FILE
                 ));
             }
-            if let Some(d) = first["details"]["case_json_sha256"].as_str() {
-                if sha256_file(&dir.join(CASE_FILE)).as_deref() != Some(d) {
-                    problems.push(format!(
-                        "{}: content differs from the digest recorded at creation (edited)",
-                        CASE_FILE
-                    ));
-                }
+            if let Some(d) = first["details"]["case_json_sha256"].as_str()
+                && sha256_file(&dir.join(CASE_FILE)).as_deref() != Some(d)
+            {
+                problems.push(format!(
+                    "{}: content differs from the digest recorded at creation (edited)",
+                    CASE_FILE
+                ));
             }
         }
         _ => problems.push(format!("{}: the first entry is not case_created", CASE_LOG)),
@@ -977,95 +986,6 @@ pub fn verify_case(dir: &Path) -> CaseVerification {
     v
 }
 
-/// What `verify-case --rehash` found.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Rehash {
-    /// Registered items re-hashed (the latest registration of each reachable path).
-    pub checked: usize,
-    /// Of those, items whose digests all equal the registry's.
-    pub matched: usize,
-    /// Items in the registry.
-    pub registered: usize,
-}
-
-/// Re-hashes every registered item that is still reachable and compares it with the registry (`verify-case
-/// --rehash`). A path registered several times (its content changed between intakes) is compared with its
-/// latest registration; earlier ones are reported as superseded. Differences go to `v.problems` (exit 3),
-/// unreachable or unreadable files to `v.warnings`.
-pub fn rehash_registry(dir: &Path, v: &mut CaseVerification) -> Rehash {
-    let items = match load_registry(dir) {
-        Ok(i) => i,
-        Err(e) => {
-            v.problems
-                .push(format!("{}: cannot re-hash: {}", REGISTRY_JSON, e.message));
-            return Rehash::default();
-        }
-    };
-    let mut r = Rehash {
-        registered: items.len(),
-        ..Default::default()
-    };
-    for (i, item) in items.iter().enumerate() {
-        if let Some(later) = items[i + 1..]
-            .iter()
-            .find(|o| same_path(&o.path, &item.path))
-        {
-            v.warnings.push(format!(
-                "{} {}: superseded by {} (same path registered again): not re-hashed",
-                item.evidence_id, item.path, later.evidence_id
-            ));
-            continue;
-        }
-        let path = PathBuf::from(&item.path);
-        if !path.is_file() {
-            v.warnings.push(format!(
-                "{} {}: not reachable from this workstation: not re-hashed",
-                item.evidence_id, item.path
-            ));
-            continue;
-        }
-        let mut algos: Vec<HashAlgo> = HashAlgo::ALL
-            .into_iter()
-            .filter(|a| item.hashes.contains_key(a.name()))
-            .collect();
-        algos.truncate(HashAlgo::MAX_SELECTED);
-        if algos.is_empty() {
-            v.warnings.push(format!(
-                "{} {}: no supported algorithm in the registry: not re-hashed",
-                item.evidence_id, item.path
-            ));
-            continue;
-        }
-        let outcome =
-            std::fs::File::open(&path).and_then(|f| crate::hash::hash_reader(f, &algos, |_| true));
-        let digests = match outcome {
-            Ok(Some(o)) => o.digests,
-            Ok(None) => continue,
-            Err(e) => {
-                v.warnings.push(format!(
-                    "{} {}: cannot be read ({}): not re-hashed",
-                    item.evidence_id, item.path, e
-                ));
-                continue;
-            }
-        };
-        r.checked += 1;
-        match compare(&item.hashes, &digests) {
-            Comparison::Match(_) => r.matched += 1,
-            Comparison::Mismatch {
-                algorithm,
-                expected,
-                actual,
-            } => v.problems.push(format!(
-                "{} {}: {} differs from the registry (registered {}, now {})",
-                item.evidence_id, item.path, algorithm, expected, actual
-            )),
-            Comparison::NoCommonAlgorithm => {}
-        }
-    }
-    r
-}
-
 /// Checks done by front-ends before a run, to map case problems to exit codes (2 usage, 3 broken):
 /// schema, broken log/registry, case id, missing --case on creation, unknown evidence ids.
 pub fn preflight(
@@ -1114,19 +1034,6 @@ impl Case {
                 ),
             ))
         }
-    }
-}
-
-/// Paths are compared as text after normalisation; Windows file systems are case-insensitive, so the
-/// comparison is too (D:\Evidence\a.pdf and d:\evidence\A.PDF are the same file there).
-pub fn same_path(a: &str, b: &str) -> bool {
-    #[cfg(windows)]
-    {
-        a.to_lowercase() == b.to_lowercase()
-    }
-    #[cfg(not(windows))]
-    {
-        a == b
     }
 }
 
@@ -1279,6 +1186,8 @@ mod tests {
             "{}",
             p
         );
+        assert!(same_path("/x/a.pdf", "/x/a.pdf"));
+        assert_eq!(same_path("/x/A.pdf", "/x/a.pdf"), cfg!(windows));
         let mut exp = BTreeMap::new();
         exp.insert("sha256".to_string(), "AA".to_string());
         assert!(matches!(
@@ -1289,52 +1198,5 @@ mod tests {
             compare(&exp, &[(Md5, "aa".into())]),
             Comparison::NoCommonAlgorithm
         ));
-    }
-
-    #[test]
-    fn rehash_compares_reachable_items_with_the_registry() {
-        let d = tempfile::tempdir().unwrap();
-        let dir = d.path().join("case");
-        let ev = d.path().join("ev");
-        std::fs::create_dir_all(&ev).unwrap();
-        let (a, b) = (ev.join("a.txt"), ev.join("b.txt"));
-        std::fs::write(&a, "a").unwrap();
-        std::fs::write(&b, "b").unwrap();
-        let sha = |p: &Path| hash_bytes(&std::fs::read(p).unwrap(), HashAlgo::Sha256);
-        let (mut c, _) = Case::open_or_create(&dir, Some("C-1"), "co", &w("R1")).unwrap();
-        let gone = ev.join("gone.txt").display().to_string();
-        c.register(
-            &w("R1"),
-            &[
-                reg(&normalize_path(&a), &sha(&a)),
-                reg(&normalize_path(&b), &sha(&b)),
-                reg(&gone, "00"),
-            ],
-        )
-        .unwrap();
-        let mut v = CaseVerification::default();
-        let r = rehash_registry(&dir, &mut v);
-        assert_eq!((r.registered, r.checked, r.matched), (3, 2, 2));
-        assert!(v.problems.is_empty(), "{:?}", v.problems);
-        assert!(
-            v.warnings
-                .iter()
-                .any(|w| w.contains("E0003") && w.contains("not reachable"))
-        );
-        // Evidence changed after intake: reported as a problem.
-        std::fs::write(&b, "B").unwrap();
-        let mut v = CaseVerification::default();
-        let r = rehash_registry(&dir, &mut v);
-        assert_eq!((r.checked, r.matched), (2, 1));
-        assert!(v.problems[0].starts_with("E0002 ") && v.problems[0].contains("sha256 differs"));
-        // Re-registered with the new content: the old entry is superseded, the new one matches.
-        c.register(&w("R2"), &[reg(&normalize_path(&b), &sha(&b))])
-            .unwrap();
-        let mut v = CaseVerification::default();
-        let r = rehash_registry(&dir, &mut v);
-        assert_eq!((r.registered, r.checked, r.matched), (4, 2, 2));
-        assert!(
-            v.problems.is_empty() && v.warnings.iter().any(|w| w.contains("superseded by E0004"))
-        );
     }
 }

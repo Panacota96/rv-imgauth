@@ -26,7 +26,9 @@ def main() -> int:
     count, failures = 0, 0
     for path in sorted(report_dir.rglob("*.json")):
         if path.name not in SCHEMAS:
-            continue  # domain outputs (object dumps, extracted files) are not reports; their digests are audited
+            # Domain outputs (e.g. objects.json, embedded files) are evidence derivatives, not reports:
+            # their digests are in the audit chain; they have no report schema.
+            continue
         schema = json.loads((ROOT / "schemas" / SCHEMAS[path.name]).read_text(encoding="utf-8"))
         try:
             jsonschema.validate(json.loads(path.read_text(encoding="utf-8")), schema)

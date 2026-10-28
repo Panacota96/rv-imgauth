@@ -1,0 +1,15 @@
+[package]
+name = "rv-imgauth-img"
+description = "RV ImgAuth image layer: JPEG, HEIC, PNG and WebP parsing (signals of modification only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+
+[lib]
+name = "rv_imgauth_img"
+path = "src/lib.rs"
+
+[dependencies]
+serde.workspace = true

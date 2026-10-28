@@ -50,8 +50,13 @@ jobs:
           ref: ${{ github.sha }}
           path: _signing
           sparse-checkout: packaging/signing
-      - name: Rust toolchain pinned in rust-toolchain.toml (the release compiler is recorded in environment.json)
-        run: rustup toolchain install && rustc --version
+      - name: Toolchain pinned in rust-toolchain.toml
+        id: toolchain
+        shell: bash
+        run: echo "channel=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
       - name: Build (static CRT, see .cargo/config.toml)
         run: cargo build --release --locked -p rv-imgauth-cli -p rv-imgauth-gui
       - name: Code signing of the executables (runs only when the SIGN_PFX_BASE64 secret exists)

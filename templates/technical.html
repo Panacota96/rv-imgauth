@@ -38,6 +38,27 @@
   <div class="kv"><div>{{ t.shows }}</div><div>{{ f.shows }}</div><div>{{ t.does_not_prove }}</div><div>{{ f.does_not_prove }}</div></div>
 </div>{% endfor %}{% else %}<p>{{ t.none }}</p>{% endif %}
 
+{% if image %}
+<h2>{{ t.image_analysis }}</h2>
+<div class="kv">
+  <div>{{ t.status }}</div><div>{{ image.status_label }}</div>
+</div>
+
+<h2>{{ t.fingerprint_dbs }}</h2>
+<div class="scroll"><table class="dense"><tr><th>{{ t.fp_role }}</th><th>{{ t.fp_db }}</th><th>{{ t.fp_version }}</th><th>{{ t.fp_entries }}</th><th>{{ t.fp_status }}</th><th>SHA-256</th></tr>
+{% for d in image.db_rows %}<tr><td>{{ d.role }}</td><td>{{ d.name }}</td><td>{{ d.version }}</td><td>{{ d.entries }}</td><td>{{ d.status }}</td><td class="mono">{{ d.sha256 }}</td></tr>{% endfor %}
+</table></div>
+
+<h2>{{ t.analysis_maps }}</h2>
+{% if image.maps %}<div class="thumbs">{% for i in image.maps %}<a href="{{ i.href }}"><img src="{{ i.href }}" alt="{{ i.name }}" loading="lazy"><span class="mono">{{ i.name }}</span></a>{% endfor %}</div>
+{% else %}<p>{{ t.maps_none }}</p>{% endif %}
+{% endif %}
+
+{% if extracted %}<h2>{{ t.extracted_files }}</h2>
+<div class="scroll"><table class="dense"><tr><th>{{ t.file }}</th><th>{{ t.fp_category }}</th><th>{{ t.bytes }}</th><th>{{ t.hashes }}</th></tr>
+{% for e in extracted %}<tr><td class="mono"><a href="{{ e.href }}">{{ e.href }}</a></td><td>{{ e.kind }}</td><td>{{ e.bytes }}</td><td class="mono">{% for d in e.digests %}<div>{{ d }}</div>{% endfor %}</td></tr>{% endfor %}
+</table></div>{% endif %}
+
 <h2>{{ t.method }}</h2>
 <p>{{ t.method_text }}</p>
 
@@ -49,5 +70,5 @@
 
 <h2>{{ t.limitations }}</h2>
 <ul>{% for l in limitations %}<li>{{ l }}</li>{% endfor %}</ul>
-<footer><div class="tagline">{{ brand.tagline }}</div>{{ t.generated_by }} {{ tool.name }} {{ tool.version }} · {{ run.run_id }} · {% if signature.signed %}{{ t.signed_by }} {{ signature.by }} (PDF; {{ t.certificate_sha256 }} <span class="mono">{{ signature.certificate_sha256 }}</span>){% else %}{{ t.not_signed }}{% endif %}</footer>
+<footer><div class="tagline">{{ brand.tagline }}</div>{{ t.generated_by }} {{ tool.name }} {{ tool.version }} · {{ run.run_id }} · {% if signature.signed %}{{ t.signed_by }} {{ signature.by }} (PDF){% else %}{{ t.not_signed }}{% endif %}</footer>
 </main></body></html>

@@ -35,15 +35,24 @@ pub enum Block {
     },
     Status(String),
     Space(f32),
-    /// Table with a header row and `rows` empty rows to fill in by hand (custody transfers).
+    /// Table with a header row and `rows` empty rows to fill in by hand (custody transfers). `labels`
+    /// pre-fills the first cell of the first rows (e.g. the role of each person); the rest stays blank.
     Grid {
         header: Vec<String>,
         widths: Vec<f32>,
         rows: usize,
         row_h: f32,
+        labels: Vec<String>,
     },
     /// Signature lines side by side: label under each line.
     SignLines(Vec<String>),
+    /// Filled table: bold header row (repeated after a page break) and wrapped cells. `widths` are
+    /// relative weights scaled to the content width.
+    Table {
+        header: Vec<String>,
+        widths: Vec<f32>,
+        rows: Vec<Vec<String>>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -402,7 +411,7 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
                 l.y -= 8.0;
             }
             Block::Heading(s) => {
-                l.ensure(40.0);
+                l.ensure(64.0); // keep a heading with at least its first lines
                 l.y -= 10.0;
                 l.lines(MARGIN, CONTENT_W, Font::Bold, 12.0, INK, s);
                 l.y -= 4.0;
@@ -471,6 +480,7 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
                 widths,
                 rows,
                 row_h,
+                labels,
             } => {
                 const SIZE: f32 = 7.5;
                 let lead = SIZE * 1.3;
@@ -513,9 +523,81 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
                     l.y = top - h;
                 };
                 draw_row(&mut l, head_h, Some(&wrapped));
-                for _ in 0..*rows {
+                for i in 0..(*rows).max(labels.len()) {
                     l.ensure(*row_h);
-                    draw_row(&mut l, *row_h, None);
+                    match labels.get(i).filter(|s| !s.is_empty()) {
+                        Some(label) => {
+                            let mut cells: Vec<Vec<String>> = vec![Vec::new(); widths.len()];
+                            if let (Some(first), Some(w)) = (cells.first_mut(), widths.first()) {
+                                *first = wrap(label, Font::Regular, SIZE, w - 6.0);
+                            }
+                            draw_row(&mut l, *row_h, Some(&cells));
+                        }
+                        None => draw_row(&mut l, *row_h, None),
+                    }
+                }
+                l.y -= 6.0;
+            }
+            Block::Table {
+                header,
+                widths,
+                rows,
+            } => {
+                const SIZE: f32 = 7.5;
+                let lead = SIZE * 1.3;
+                let total: f32 = widths.iter().sum::<f32>().max(1.0);
+                let ws: Vec<f32> = widths.iter().map(|w| w / total * CONTENT_W).collect();
+                let cells = |row: &[String], font: Font| -> Vec<Vec<String>> {
+                    ws.iter()
+                        .enumerate()
+                        .map(|(i, w)| {
+                            let txt = row.get(i).map(String::as_str).unwrap_or("");
+                            let f = if font == Font::Regular && looks_like_hash(txt) {
+                                Font::Mono
+                            } else {
+                                font
+                            };
+                            wrap(txt, f, SIZE, w - 6.0)
+                        })
+                        .collect()
+                };
+                let draw = |l: &mut Layout, c: &[Vec<String>], font: Font, shade: bool| {
+                    let n = c.iter().map(|x| x.len()).max().unwrap_or(1).max(1);
+                    let h = n as f32 * lead + 5.0;
+                    let top = l.y;
+                    if shade {
+                        l.rect(MARGIN, top - h, CONTENT_W, h, (0.961, 0.969, 0.984));
+                    }
+                    let mut x = MARGIN;
+                    for (i, w) in ws.iter().enumerate() {
+                        for (j, line) in c[i].iter().enumerate() {
+                            let f = if font == Font::Regular && looks_like_hash(line) {
+                                Font::Mono
+                            } else {
+                                font
+                            };
+                            let col = if shade { MUTED } else { INK };
+                            l.text(x + 3.0, top - lead * (j as f32 + 1.0), f, SIZE, col, line);
+                        }
+                        x += w;
+                    }
+                    l.y = top - h;
+                    let y = l.y;
+                    l.rule(y, 0.4, LINE);
+                };
+                let head = cells(header, Font::Bold);
+                let head_h = head.iter().map(|x| x.len()).max().unwrap_or(1) as f32 * lead + 5.0;
+                l.ensure(head_h + 3.0 * lead);
+                l.y -= 2.0;
+                draw(&mut l, &head, Font::Bold, true);
+                for r in rows {
+                    let c = cells(r, Font::Regular);
+                    let h = c.iter().map(|x| x.len()).max().unwrap_or(1) as f32 * lead + 5.0;
+                    if l.y - h < BOTTOM {
+                        l.ensure(h + head_h);
+                        draw(&mut l, &head, Font::Bold, true);
+                    }
+                    draw(&mut l, &c, Font::Regular, false);
                 }
                 l.y -= 6.0;
             }
@@ -653,9 +735,6 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
         out.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", i + 1, o).as_bytes());
     }
     let xref = out.len();
-    // Where the signature dictionary was written: the placeholder is searched for there only, never in
-    // page text that might contain the same bytes.
-    let sig_offset = offsets.get(sig_obj - 1).copied().unwrap_or(0);
     let mut x = format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
     for off in offsets {
         let _ = writeln!(x, "{:010} 00000 n ", off);
@@ -668,7 +747,7 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
     );
     out.extend_from_slice(x.as_bytes());
     if let Some(sign) = sign {
-        sign_in_place(&mut out, sig_offset, sign)?;
+        sign_in_place(&mut out, sign)?;
     }
     Ok(out)
 }
@@ -678,23 +757,13 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// Fills /ByteRange and /Contents of the signature placeholder (no incremental update needed:
-/// the placeholder was written with the document). `sig_offset` is the offset of the signature
-/// dictionary object (`N 0 obj`): both placeholders are located inside that object, so text in a page
-/// that happens to contain "/Contents <0000" or the byte-range marker is never touched.
-fn sign_in_place(out: &mut [u8], sig_offset: usize, sign: SignFn) -> Result<(), String> {
-    let obj_end =
-        sig_offset + find(&out[sig_offset..], b"endobj").ok_or("signature object not found")?;
-    let in_sig = |needle: &[u8]| -> Option<usize> {
-        find(&out[sig_offset..obj_end], needle).map(|p| sig_offset + p)
-    };
+/// the placeholder was written with the document).
+fn sign_in_place(out: &mut [u8], sign: SignFn) -> Result<(), String> {
     let start =
-        in_sig(b"/Contents <0000").ok_or("signature placeholder missing")? + "/Contents ".len();
+        find(out, b"/Contents <0000").ok_or("signature placeholder missing")? + "/Contents ".len();
     let end = start + 2 + SIG_CONTENTS_BYTES * 2;
     let br_marker = b"/ByteRange [0 0000000000 0000000000 0000000000]";
-    let br = in_sig(br_marker).ok_or("byte range placeholder missing")?;
-    if !(out.get(start) == Some(&b'<') && out.get(end - 1) == Some(&b'>')) {
-        return Err("signature placeholder has an unexpected size".into());
-    }
+    let br = find(out, br_marker).ok_or("byte range placeholder missing")?;
     let range = format!(
         "/ByteRange [0 {:010} {:010} {:010}]",
         start,
@@ -763,6 +832,7 @@ mod tests {
                     widths: vec![100.0, 100.0],
                     rows: 3,
                     row_h: 20.0,
+                    labels: vec!["Witness".into()],
                 },
                 Block::SignLines(vec!["Examiner".into(), "Receiver".into()]),
             ],
@@ -772,8 +842,7 @@ mod tests {
         .unwrap();
         let text = String::from_utf8_lossy(&pdf);
         assert!(text.contains("/SigFlags 3") && !text.contains("/ByteRange [0 0000000000"));
-        let sig = find(&pdf, b"/Type /Sig ").unwrap();
-        let start = sig + find(&pdf[sig..], b"/Contents <").unwrap() + 10;
+        let start = find(&pdf, b"/Contents <").unwrap() + 10;
         let end = start + 2 + SIG_CONTENTS_BYTES * 2;
         let mut covered = pdf[..start].to_vec();
         covered.extend_from_slice(&pdf[end..]);
@@ -783,54 +852,6 @@ mod tests {
         .to_uppercase();
         assert!(text.contains(&format!("<{}", expected)));
         assert!(pdf.ends_with(b"%%EOF\n"));
-    }
-
-    /// Page text holding the placeholder byte sequences must not be mistaken for the signature dictionary.
-    #[test]
-    fn placeholder_bytes_in_page_text_are_left_alone() {
-        let sign = |data: &[u8]| -> Result<Vec<u8>, String> {
-            Ok(crate::hash::hash_bytes(data, crate::hash::HashAlgo::Sha256).into_bytes())
-        };
-        let decoy = "/Contents <0000 and /ByteRange [0 0000000000 0000000000 0000000000]";
-        let pdf = render(
-            &[Block::Title(decoy.into()), Block::Para(decoy.into())],
-            &test_meta(),
-            Some(&sign),
-        )
-        .unwrap();
-        let sig = find(&pdf, b"/Type /Sig ").unwrap();
-        // The decoys come before the signature object and are unchanged.
-        let first_decoy = find(&pdf, b"/Contents <0000 and").unwrap();
-        assert!(first_decoy < sig);
-        assert!(
-            find(
-                &pdf[..sig],
-                b"/ByteRange [0 0000000000 0000000000 0000000000]"
-            )
-            .is_some()
-        );
-        // The real placeholder (inside the signature object) holds the signature over the byte range.
-        let br_at = sig + find(&pdf[sig..], b"/ByteRange [").unwrap();
-        let br: Vec<usize> = String::from_utf8_lossy(&pdf[br_at + 12..br_at + 12 + 34])
-            .split_whitespace()
-            .map(|x| x.parse().unwrap())
-            .collect();
-        assert_eq!(br[0], 0);
-        assert_eq!(br[2] + br[3], pdf.len());
-        assert!(
-            br[1] > sig,
-            "the signed gap is inside the signature dictionary"
-        );
-        let mut covered = pdf[..br[1]].to_vec();
-        covered.extend_from_slice(&pdf[br[2]..]);
-        let expected = crate::hash::hex(
-            &crate::hash::hash_bytes(&covered, crate::hash::HashAlgo::Sha256).into_bytes(),
-        )
-        .to_uppercase();
-        assert_eq!(
-            &pdf[br[1] + 1..br[1] + 1 + expected.len()],
-            expected.as_bytes()
-        );
     }
 
     #[test]

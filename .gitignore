@@ -3,4 +3,12 @@
 /dist/
 *.pdb
 /examples/sample/out/
+/.venv/
 __pycache__/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+
+# Claude Code agent worktrees (local only)
+.claude/
+/fuzz/Cargo.lock

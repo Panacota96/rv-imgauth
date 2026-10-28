@@ -6,7 +6,7 @@
 
 ## Context
 
-Reports signals of modification in JPEG, HEIC/HEIF, PNG and WebP images (metadata and structure, quantization-table fingerprints and double compression, ELA and noise maps, copy-move detection, comparison with reference images) for clients and courts; bulk folders on 8 GB Windows laptops without GPU; joins the Rust toolkit (rv-hashinv, rv-pdfauth, rv-rsmf).
+Reports signals of modification in JPEG, HEIC/HEIF, PNG and WebP images (metadata and structure, quantization-table fingerprints and double compression, ELA and noise maps, copy-move detection, comparison with reference images) for clients and courts; bulk folders on 8 GB Windows laptops without GPU; joins the Rust toolkit (rv-hashinv, rv-imgauth, rv-rsmf).
 
 Weight preset: **client**. Score overrides argued by the council:
 
@@ -59,7 +59,7 @@ Profile A (Rust workspace: core + clap CLI + egui GUI).
 | --- | --- |
 | rust.velocity 3→2, rust.dfir_ecosystem 4→2 (no crate exposes JPEG DCT coefficients or ORB/SIFT; reference code is Python/OpenCV) | Accepted |
 | rust.packaging 4→3 (native decoders need nasm/cmake; LGPL HEIF DLLs) | Accepted (v1 avoids both: own coefficient decoder, HEIC structure only) |
-| rust.gui 4→3 (overlay viewer by hand) | Rejected: rv-pdfauth's synced side-by-side viewer with overlays is reused |
+| rust.gui 4→3 (overlay viewer by hand) | Rejected: rv-imgauth's synced side-by-side viewer with overlays is reused |
 | rust.auditability 5→4 (unsafe FFI) | Rejected: applies equally to Python's C libraries; v1 parsers are `#![forbid(unsafe_code)]` |
 | python.hardware 3→2 (float64 promotion), python.gui 4→5 (QGraphicsView) | Accepted |
 | python.auditability 3→4 (short readable algorithms) | Rejected: dynamic typing and frozen-binary packaging remain |
@@ -67,7 +67,7 @@ Profile A (Rust workspace: core + clap CLI + egui GUI).
 
 ## Consequences
 
-- Rust workspace from the Rakvor template; worker process per item and the synced overlay viewer ported from rv-pdfauth.
+- Rust workspace from the Rakvor template; worker process per item and the synced overlay viewer ported from rv-imgauth.
 - In-house, `#![forbid(unsafe_code)]`, fuzzed: JPEG marker parser + baseline Huffman decoder to DCT coefficients, IPTC-IIM, HEIF/ISOBMFF box walker, PNG and WebP chunk walkers.
 - Crates: zune-jpeg, png, image-webp (pixels), jpeg-encoder (deterministic re-encoding for ELA/ghosts), kamadak-exif, quick-xml, rustfft, rayon; `windows` (WIC) for optional HEIC pixels. No GPL/AGPL (cargo-deny allow-list).
 - Main risk: in-house forensic algorithms. Mitigation: independent oracles in CI (Pillow quantization tables, ExifTool, numpy reference maps), synthetic ground truth, fuzzing.

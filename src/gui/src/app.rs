@@ -1,8 +1,9 @@
 //! The window. Drawing only: rules live in `state.rs`, work lives in the core (on a worker thread).
 //! Rakvor dark theme; interface language EN/ES/FR switchable at any time (texts from i18n "ui").
 
-use crate::state::{GuiState, Phase};
+use crate::state::{GuiState, MAP_KINDS, OptionChange, Phase, decode_png, verify_digest};
 use eframe::egui;
+use rv_imgauth_core::analyzer::Severity;
 use rv_imgauth_core::{Event, HashAlgo, RunConfig, RunSummary, TOOL_VERSION};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -18,10 +19,51 @@ const VIOLET: egui::Color32 = egui::Color32::from_rgb(0x6B, 0x00, 0xFF);
 const CYAN: egui::Color32 = egui::Color32::from_rgb(0x00, 0xE5, 0xFF);
 const MIST: egui::Color32 = egui::Color32::from_rgb(0xE6, 0xE6, 0xE6);
 const UI_LANGS: [(&str, &str); 3] = [("en", "English"), ("es", "Español"), ("fr", "Français")];
+const RED: egui::Color32 = egui::Color32::from_rgb(0xFF, 0x6B, 0x6B);
+const AMBER: egui::Color32 = egui::Color32::from_rgb(0xFF, 0xB0, 0x40);
+const YELLOW: egui::Color32 = egui::Color32::from_rgb(0xF2, 0xD3, 0x5B);
+const GREEN: egui::Color32 = egui::Color32::from_rgb(0x4C, 0xD0, 0x8A);
+const GREY: egui::Color32 = egui::Color32::from_rgb(0x9A, 0xA4, 0xB2);
+// Preset values for the numeric options (one click = one audited change; the current value is always listed).
+const ELA_QUALITY_PRESETS: [u8; 5] = [75, 85, 90, 95, 100];
+/// Megapixels (the option is stored in pixels).
+const MEGAPIXEL_PRESETS: [u64; 6] = [25, 50, 100, 200, 500, 1000];
+const TIMEOUT_PRESETS: [u64; 5] = [60, 120, 300, 600, 1800];
+const MEMORY_PRESETS: [u64; 5] = [1024, 2048, 4096, 8192, 16384];
+
+fn severity_color(s: Severity) -> egui::Color32 {
+    match s {
+        Severity::High => RED,
+        Severity::Medium => AMBER,
+        Severity::Low => YELLOW,
+        Severity::Info => GREY,
+    }
+}
+
+fn status_color(s: &str) -> egui::Color32 {
+    match s {
+        "problem" => RED,
+        "attention" => AMBER,
+        _ => GREEN,
+    }
+}
+
+/// Zoom by a factor at an anchor (panel px), for a panel size and an image size.
+type ZoomRequest = (f32, [f32; 2], [f32; 2], [f32; 2]);
 
 enum Msg {
     Event(Event),
     Done(Result<RunSummary, String>),
+}
+
+/// One picture currently on screen (the original's preview or an overlay map), decoded once per selection.
+struct ViewerTexture {
+    path: PathBuf,
+    handle: Option<egui::TextureHandle>,
+    size: [u32; 2],
+    /// Some(true) = matches the digest recorded in the audit log.
+    digest_ok: Option<bool>,
+    error: Option<String>,
 }
 
 pub struct HashInvApp {
@@ -31,8 +73,37 @@ pub struct HashInvApp {
     started: Option<Instant>,
     notice: Option<String>,
     themed: bool,
+    /// Left side: the original's preview; right side: the selected overlay map.
+    original_tex: Option<ViewerTexture>,
+    map_tex: Option<ViewerTexture>,
     /// Case folder being typed; applied (and audited) when the field loses focus.
     case_entry: String,
+}
+
+/// A ComboBox of preset numbers that also lists the current value; returns the picked one.
+fn preset_combo<T: Copy + PartialEq + Ord + std::fmt::Display>(
+    ui: &mut egui::Ui,
+    id: &str,
+    current: T,
+    presets: &[T],
+) -> Option<T> {
+    let mut values: Vec<T> = presets.to_vec();
+    if !values.contains(&current) {
+        values.push(current);
+        values.sort();
+    }
+    let mut picked = None;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(current.to_string())
+        .width(70.0)
+        .show_ui(ui, |ui| {
+            for v in values {
+                if ui.selectable_label(v == current, v.to_string()).clicked() && v != current {
+                    picked = Some(v);
+                }
+            }
+        });
+    picked
 }
 
 /// Applies the Rakvor dark theme.
@@ -65,6 +136,8 @@ impl HashInvApp {
             started: None,
             notice: None,
             themed: false,
+            original_tex: None,
+            map_tex: None,
             case_entry: String::new(),
         }
     }
@@ -122,7 +195,12 @@ impl HashInvApp {
                     }
                     self.state.apply(&e)
                 }
-                Msg::Done(Ok(_)) => finished = true,
+                Msg::Done(Ok(summary)) => {
+                    self.state.load_results(&summary);
+                    self.original_tex = None;
+                    self.map_tex = None;
+                    finished = true;
+                }
                 Msg::Done(Err(e)) => {
                     self.state.fail(e);
                     finished = true;
@@ -299,6 +377,40 @@ impl HashInvApp {
                     }
                 }
             });
+            if self.state.out_locked() {
+                ui.horizontal_wrapped(|ui| {
+                    let mut on = self.state.intake_hashinv;
+                    if ui
+                        .checkbox(&mut on, self.state.tr("intake_hashinv"))
+                        .changed()
+                    {
+                        self.state.set_intake_hashinv(on);
+                    }
+                    match &self.state.hashinv {
+                        Some(Ok(t)) if self.state.intake_hashinv => {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(0x4C, 0xD9, 0x7B),
+                                format!("rv-hashinv {}", t.version),
+                            )
+                            .on_hover_text(format!(
+                                "{}\nSHA-256 {}",
+                                t.path.display(),
+                                t.sha256
+                            ));
+                        }
+                        Some(Err(e)) if self.state.intake_hashinv => {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(0xFF, 0x6B, 0x6B),
+                                self.state.tr("intake_not_found"),
+                            )
+                            .on_hover_text(e.as_str());
+                        }
+                        _ => {
+                            ui.weak(self.state.tr("intake_hint"));
+                        }
+                    }
+                });
+            }
         });
     }
 
@@ -332,6 +444,519 @@ impl HashInvApp {
                 }
             });
         });
+    }
+
+    fn options_section(&mut self, ui: &mut egui::Ui, enabled: bool) {
+        Self::section_title(ui, self.state.tr("options"));
+        let o = self.state.options.clone();
+        let mut fp_entry = self.state.fp_db_entry.clone();
+        let tr = |k: &str| self.state.tr(k);
+        let mut changes: Vec<OptionChange> = vec![];
+        let mut ref_entry = self.state.references_entry.clone();
+        ui.add_enabled_ui(enabled, |ui| {
+            egui::Grid::new("options-grid")
+                .num_columns(2)
+                .spacing([24.0, 6.0])
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(tr("opt_maps"));
+                        for kind in MAP_KINDS {
+                            let mut on = o.maps.iter().any(|m| m == kind);
+                            if ui
+                                .checkbox(&mut on, tr(&format!("opt_map_{}", kind)))
+                                .changed()
+                            {
+                                let mut maps = o.maps.clone();
+                                maps.retain(|m| m != kind);
+                                if on {
+                                    maps.push(kind.to_string());
+                                }
+                                changes.push(OptionChange::Maps(maps));
+                            }
+                        }
+                    });
+                    let mut v = o.copy_move;
+                    if ui.checkbox(&mut v, tr("opt_copy_move")).changed() {
+                        changes.push(OptionChange::CopyMove(v));
+                    }
+                    ui.end_row();
+
+                    ui.horizontal(|ui| {
+                        ui.label(tr("opt_ela_quality"));
+                        if let Some(q) =
+                            preset_combo(ui, "opt-ela-quality", o.ela_quality, &ELA_QUALITY_PRESETS)
+                        {
+                            changes.push(OptionChange::ElaQuality(q));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(tr("opt_max_pixels"));
+                        let mp = o.max_pixels / 1_000_000;
+                        if let Some(m) = preset_combo(ui, "opt-max-pixels", mp, &MEGAPIXEL_PRESETS)
+                        {
+                            changes.push(OptionChange::MaxPixels(m * 1_000_000));
+                        }
+                        ui.label("Mpx");
+                    });
+                    ui.end_row();
+
+                    ui.horizontal(|ui| {
+                        ui.label(tr("opt_worker"));
+                        ui.label(tr("opt_timeout"));
+                        if let Some(t) =
+                            preset_combo(ui, "opt-timeout", o.worker_timeout_s, &TIMEOUT_PRESETS)
+                        {
+                            changes.push(OptionChange::WorkerTimeout(t));
+                        }
+                        ui.label(tr("opt_memory"));
+                        if let Some(m) =
+                            preset_combo(ui, "opt-memory", o.worker_memory_mb, &MEMORY_PRESETS)
+                        {
+                            changes.push(OptionChange::WorkerMemory(m));
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(tr("opt_item_reports"));
+                        if ui
+                            .radio(!o.item_reports_flagged_only, tr("opt_reports_all"))
+                            .clicked()
+                        {
+                            changes.push(OptionChange::ItemReportsFlaggedOnly(false));
+                        }
+                        if ui
+                            .radio(o.item_reports_flagged_only, tr("opt_reports_flagged"))
+                            .clicked()
+                        {
+                            changes.push(OptionChange::ItemReportsFlaggedOnly(true));
+                        }
+                    });
+                    ui.end_row();
+                });
+            ui.horizontal(|ui| {
+                ui.label(tr("opt_references"));
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut ref_entry)
+                        .hint_text(tr("opt_references_hint"))
+                        .desired_width(360.0),
+                );
+                if r.lost_focus() {
+                    changes.push(OptionChange::References(ref_entry.clone()));
+                }
+                #[cfg(windows)]
+                if ui.button(tr("browse")).clicked() {
+                    if let Some(files) = rfd::FileDialog::new()
+                        .add_filter("Images", &["jpg", "jpeg", "png", "webp", "heic", "heif"])
+                        .pick_files()
+                    {
+                        let mut all: Vec<String> = ref_entry
+                            .split(';')
+                            .map(|p| p.trim().to_string())
+                            .filter(|p| !p.is_empty())
+                            .collect();
+                        all.extend(files.iter().map(|f| f.display().to_string()));
+                        changes.push(OptionChange::References(all.join(";")));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(tr("opt_fp_db"));
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut fp_entry)
+                        .hint_text(tr("opt_fp_hint"))
+                        .desired_width(360.0),
+                );
+                if r.lost_focus() {
+                    changes.push(OptionChange::FingerprintsDb(fp_entry.clone()));
+                }
+                #[cfg(windows)]
+                if ui.button(tr("browse")).clicked() {
+                    if let Some(f) = rfd::FileDialog::new()
+                        .add_filter("JSON", &["json"])
+                        .pick_file()
+                    {
+                        changes.push(OptionChange::FingerprintsDb(f.display().to_string()));
+                    }
+                }
+            });
+        });
+        self.state.references_entry = ref_entry;
+        self.state.fp_db_entry = fp_entry;
+        for c in changes {
+            self.state.set_option(c);
+        }
+    }
+
+    fn results_table(&mut self, ui: &mut egui::Ui) {
+        if self.state.results.is_empty() {
+            return;
+        }
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(self.state.tr("results"))
+                .color(CYAN)
+                .strong(),
+        );
+        let mut open = None;
+        egui::ScrollArea::vertical()
+            .id_salt("results")
+            .max_height(220.0)
+            .show(ui, |ui| {
+                egui::Grid::new("results-grid")
+                    .num_columns(6)
+                    .striped(true)
+                    .spacing([16.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.strong("#");
+                        ui.strong(self.state.tr("col_file"));
+                        ui.strong(self.state.tr("col_status"));
+                        ui.strong(self.state.tr("col_findings"));
+                        ui.strong(self.state.tr("col_maps"));
+                        ui.label("");
+                        ui.end_row();
+                        for (i, r) in self.state.results.iter().enumerate() {
+                            ui.monospace(r.index.to_string());
+                            match &r.evidence_id {
+                                // Case folder: the registry id next to the file name.
+                                Some(id) => ui.label(format!("{}  {}", id, r.name)),
+                                None => ui.label(&r.name),
+                            };
+                            ui.colored_label(
+                                status_color(&r.status),
+                                self.state.tr(&format!("status_{}", r.status)),
+                            );
+                            let txt = match r.top {
+                                Some(s) => {
+                                    format!("{} ({})", r.findings, self.state.severity_name(s))
+                                }
+                                None => r.findings.to_string(),
+                            };
+                            ui.colored_label(r.top.map_or(MIST, severity_color), txt);
+                            ui.label(r.maps.to_string());
+                            if ui
+                                .add_enabled(
+                                    r.viewer_item.is_some(),
+                                    egui::Button::new(self.state.tr("review")),
+                                )
+                                .clicked()
+                            {
+                                open = Some(i);
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+        if let Some(i) = open {
+            self.state.open_viewer(i);
+        }
+    }
+
+    /// Loads (once per selection) a PNG of the item folder and checks it against the audit log.
+    fn load_texture(
+        ctx: &egui::Context,
+        slot: &mut Option<ViewerTexture>,
+        path: Option<PathBuf>,
+        digest: Option<(String, String)>,
+    ) {
+        let Some(path) = path else {
+            *slot = None;
+            return;
+        };
+        if slot.as_ref().is_some_and(|t| t.path == path) {
+            return;
+        }
+        let mut t = ViewerTexture {
+            path: path.clone(),
+            handle: None,
+            size: [0, 0],
+            digest_ok: None,
+            error: None,
+        };
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                t.digest_ok = digest.as_ref().and_then(|d| verify_digest(&bytes, d));
+                match decode_png(&bytes) {
+                    Ok((w, h, rgba)) => {
+                        let img = egui::ColorImage::from_rgba_unmultiplied(
+                            [w as usize, h as usize],
+                            &rgba,
+                        );
+                        t.handle = Some(ctx.load_texture(
+                            path.display().to_string(),
+                            img,
+                            egui::TextureOptions::LINEAR,
+                        ));
+                        t.size = [w, h];
+                    }
+                    Err(e) => t.error = Some(e),
+                }
+            }
+            Err(e) => t.error = Some(e.to_string()),
+        }
+        *slot = Some(t);
+    }
+
+    fn sync_textures(&mut self, ctx: &egui::Context) {
+        let v = &self.state.viewer;
+        let (op, od, mp, md) = (
+            v.original_path(),
+            v.original_digest(),
+            v.map_path(),
+            v.map_digest(),
+        );
+        Self::load_texture(ctx, &mut self.original_tex, op, od);
+        Self::load_texture(ctx, &mut self.map_tex, mp, md);
+    }
+
+    fn viewer_ui(&mut self, ui: &mut egui::Ui) {
+        self.sync_textures(ui.ctx());
+        let tr = |k: &str| self.state.tr(k);
+        // Title + selectors.
+        let mut back = false;
+        let (mut sel_item, mut sel_map) = (None, None);
+        let mut zoom_factor: Option<f32> = None;
+        let mut fit = false;
+        let header = self.state.viewer_header();
+        let v = &self.state.viewer;
+        let Some(item) = v.current_item().cloned() else {
+            self.state.viewer.close();
+            return;
+        };
+        let (title, case_check) = header.unwrap_or_default();
+        ui.horizontal(|ui| {
+            if ui.button(tr("back")).clicked() {
+                back = true;
+            }
+            ui.label(
+                egui::RichText::new(format!("{} \u{00B7} {}", tr("viewer_title"), title))
+                    .color(CYAN)
+                    .strong()
+                    .size(15.0),
+            );
+            // Case folder: the result of the registry check for this item (red when it differs).
+            if let Some(check) = case_check {
+                let color = match item.case_status.as_deref() {
+                    Some("verified") => GREEN,
+                    Some("mismatch") => RED,
+                    _ => AMBER,
+                };
+                ui.colored_label(color, check);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label(tr("item"));
+            egui::ComboBox::from_id_salt("viewer-item")
+                .selected_text(&item.name)
+                .show_ui(ui, |ui| {
+                    for (i, it) in v.items.iter().enumerate() {
+                        if ui.selectable_label(i == v.item, &it.name).clicked() {
+                            sel_item = Some(i);
+                        }
+                    }
+                });
+            ui.label(tr("overlay"));
+            egui::ComboBox::from_id_salt("viewer-map")
+                .selected_text(
+                    v.current_map()
+                        .map(|m| m.name().to_string())
+                        .unwrap_or_else(|| "\u{2014}".into()),
+                )
+                .show_ui(ui, |ui| {
+                    for (i, m) in item.maps.iter().enumerate() {
+                        if ui
+                            .selectable_label(i == v.map, format!("{} ({})", m.name(), m.kind))
+                            .clicked()
+                        {
+                            sel_map = Some(i);
+                        }
+                    }
+                });
+            ui.separator();
+            ui.label(tr("zoom"));
+            if ui.button(" - ").clicked() {
+                zoom_factor = Some(1.0 / crate::state::ZOOM_STEP);
+            }
+            ui.monospace(format!("{:>4.0}%", v.zoom * 100.0));
+            if ui.button(" + ").clicked() {
+                zoom_factor = Some(crate::state::ZOOM_STEP);
+            }
+            if ui.button(tr("fit")).clicked() {
+                fit = true;
+            }
+        });
+        ui.weak(tr("viewer_help"));
+
+        // Picture area (original | overlay, synchronised zoom and pan) + findings below.
+        let findings = self.state.viewer_findings();
+        let avail = ui.available_size();
+        let find_h = (avail.y * 0.30).clamp(110.0, 240.0);
+        let pic_h = (avail.y - find_h - 40.0).max(160.0);
+        ui.horizontal(|ui| {
+            for (label, tex) in [
+                (tr("original"), self.original_tex.as_ref()),
+                (tr("overlay"), self.map_tex.as_ref()),
+            ] {
+                if let Some(t) = tex {
+                    ui.label(format!("{}:", label));
+                    match t.digest_ok {
+                        Some(true) => ui.colored_label(GREEN, tr("digest_ok")),
+                        Some(false) => ui.colored_label(RED, tr("digest_bad")),
+                        None => ui.colored_label(GREY, tr("digest_none")),
+                    };
+                    if let Some(e) = &t.error {
+                        ui.colored_label(RED, e);
+                    }
+                }
+            }
+        });
+        let (area, _) = ui.allocate_exact_size(egui::vec2(avail.x, pic_h), egui::Sense::hover());
+        let mut pan: Option<egui::Vec2> = None;
+        let mut zoom_at: Option<ZoomRequest> = None;
+        let mut reset = false;
+        let w = (area.width() - 8.0) / 2.0;
+        let panels = [
+            (
+                egui::Rect::from_min_size(area.min, egui::vec2(w, area.height())),
+                self.original_tex.as_ref(),
+                tr("original"),
+                if item.analysis_status == "not_completed" {
+                    tr("analysis_not_completed")
+                } else {
+                    tr("no_preview")
+                },
+            ),
+            (
+                egui::Rect::from_min_size(
+                    area.min + egui::vec2(w + 8.0, 0.0),
+                    egui::vec2(w, area.height()),
+                ),
+                self.map_tex.as_ref(),
+                v.current_map()
+                    .map(|m| format!("{} \u{00B7} {}", tr("overlay"), m.name()))
+                    .unwrap_or_else(|| tr("overlay")),
+                tr("no_maps"),
+            ),
+        ];
+        for (n, (rect, tex, label, empty)) in panels.into_iter().enumerate() {
+            let painter = ui.painter_at(rect);
+            painter.rect_filled(rect, 4.0, NIGHT2);
+            match tex.and_then(|t| t.handle.as_ref().map(|h| (h.id(), t.size))) {
+                Some((id, size)) => {
+                    let size = [size[0] as f32, size[1] as f32];
+                    let (sc, off) = v.transform([rect.width(), rect.height()], size);
+                    let img = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(off[0], off[1]),
+                        egui::vec2(size[0] * sc, size[1] * sc),
+                    );
+                    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    painter.image(id, img, uv, egui::Color32::WHITE);
+                    let resp = ui.interact(
+                        rect,
+                        ui.make_persistent_id(("rv-viewer-side", n)),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if resp.dragged() {
+                        pan = Some(resp.drag_delta());
+                    }
+                    if resp.double_clicked() {
+                        reset = true;
+                    }
+                    if resp.hovered() {
+                        let (scroll, pinch, pointer) = ui.input(|i| {
+                            (
+                                i.smooth_scroll_delta.y,
+                                i.zoom_delta(),
+                                i.pointer.hover_pos(),
+                            )
+                        });
+                        let f = pinch * (scroll / 240.0).exp();
+                        if (f - 1.0).abs() > 1e-4 {
+                            let a = pointer.unwrap_or(rect.center()) - rect.min;
+                            zoom_at = Some((f, [a.x, a.y], [rect.width(), rect.height()], size));
+                        }
+                    }
+                }
+                None => {
+                    let g = painter.layout(
+                        empty,
+                        egui::FontId::proportional(14.0),
+                        GREY,
+                        (rect.width() - 48.0).max(100.0),
+                    );
+                    painter.galley(rect.center() - g.size() / 2.0, g, GREY);
+                }
+            }
+            let g = painter.layout_no_wrap(label, egui::FontId::proportional(13.0), MIST);
+            let bg = egui::Rect::from_min_size(
+                rect.min + egui::vec2(6.0, 6.0),
+                g.size() + egui::vec2(10.0, 6.0),
+            );
+            painter.rect_filled(bg, 4.0, NIGHT.gamma_multiply(0.85));
+            painter.galley(bg.min + egui::vec2(5.0, 3.0), g, MIST);
+        }
+
+        // Findings for this item.
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(tr("item_findings"))
+                .color(CYAN)
+                .strong(),
+        );
+        egui::ScrollArea::vertical()
+            .id_salt("viewer-findings")
+            .max_height(find_h)
+            .show(ui, |ui| {
+                if findings.is_empty() {
+                    ui.weak(tr("no_findings"));
+                }
+                for f in &findings {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(
+                            egui::RichText::new(format!(
+                                " {} ",
+                                self.state.severity_name(f.severity)
+                            ))
+                            .color(NIGHT)
+                            .strong()
+                            .background_color(severity_color(f.severity)),
+                        );
+                        ui.strong(&f.title);
+                        ui.weak(&f.code);
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(GREEN, format!("{}:", tr("shows")));
+                        ui.label(&f.shows);
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(AMBER, format!("{}:", tr("not_proves")));
+                        ui.label(&f.not_proves);
+                    });
+                    ui.add_space(4.0);
+                }
+            });
+
+        // Apply interactions (state rules live in Viewer).
+        let vw = &mut self.state.viewer;
+        if back {
+            vw.close();
+        }
+        if let Some(i) = sel_item {
+            vw.select_item(i);
+        }
+        if let Some(m) = sel_map {
+            vw.select_map(m);
+        }
+        if let Some(f) = zoom_factor {
+            vw.set_zoom(vw.zoom * f);
+        }
+        if fit || reset {
+            vw.reset_view();
+        }
+        if let Some(d) = pan {
+            vw.pan_by([d.x, d.y]);
+        }
+        if let Some((f, a, p, s)) = zoom_at {
+            vw.zoom_at(f, a, p, s);
+        }
     }
 
     fn report_section(&mut self, ui: &mut egui::Ui, enabled: bool) {
@@ -540,6 +1165,13 @@ impl HashInvApp {
         );
         let live = self.started.map(|s| s.elapsed().as_millis() as u64);
         ui.label(self.state.timing_text(live));
+        if let Some((done, total)) = self.state.intake_progress {
+            ui.weak(format!(
+                "{}: {done}/{total} {}",
+                self.state.tr("intake_progress"),
+                self.state.tr("files")
+            ));
+        }
         if !self.state.current_item.is_empty() {
             ui.weak(format!(
                 "{}: {}",
@@ -601,7 +1233,24 @@ impl HashInvApp {
                         if ui.button(self.state.tr("open_logs")).clicked() {
                             open_path(&o.log_dir);
                         }
+                        if let Some(dir) = self.state.intake_report_dir.clone()
+                            && ui.button(self.state.tr("open_hash_report")).clicked()
+                        {
+                            let lang = if self.state.lang == "all" {
+                                "en"
+                            } else {
+                                self.state.lang.as_str()
+                            };
+                            let stats =
+                                std::path::Path::new(&dir).join(format!("statistics.{lang}.html"));
+                            open_path(&if stats.is_file() {
+                                stats
+                            } else {
+                                std::path::PathBuf::from(dir)
+                            });
+                        }
                     });
+                    self.results_table(ui);
                 }
             }
             _ => {}
@@ -648,13 +1297,23 @@ impl eframe::App for HashInvApp {
             ui.ctx().request_repaint_after(Duration::from_millis(200));
         }
         egui::CentralPanel::default().show(ui, |ui| {
+            if self.state.viewer.open {
+                // No outer scroll area: the mouse wheel zooms the picture.
+                self.header(ui);
+                self.viewer_ui(ui);
+                return;
+            }
             egui::ScrollArea::vertical().show(ui, |ui| {
                 self.header(ui);
                 let enabled = !self.state.is_running();
                 self.evidence_section(ui, enabled);
                 self.hashing_section(ui, enabled);
-                self.report_section(ui, enabled);
-                self.trust_section(ui, enabled);
+                self.options_section(ui, enabled);
+                // Reports and trust side by side: a finished run and its results fit on one screen.
+                ui.columns(2, |cols| {
+                    self.report_section(&mut cols[0], enabled);
+                    self.trust_section(&mut cols[1], enabled);
+                });
                 self.run_section(ui);
             });
         });

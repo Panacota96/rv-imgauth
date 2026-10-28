@@ -5,7 +5,7 @@
 //! `<CASE>/runs/<tool>/<RUN-ID>/`, the case log records run_started / run_finished, and depending on
 //! [`CaseRole`] every item is registered (intake) or verified against the registry (analysis).
 
-use crate::analyzer::{Finding, Severity, analyze};
+use crate::analyzer::{Finding, Severity, analyze_item};
 use crate::audit::AuditLog;
 use crate::case::{self, Case, CaseRole, Comparison, Registration, Writer};
 use crate::events::{Event, eta_ms};
@@ -45,6 +45,8 @@ pub struct RunConfig {
     pub sign_cert: Option<PathBuf>,
     /// Never logged.
     pub sign_password: Option<String>,
+    /// Tool-specific analysis options (rv-imgauth: maps, copy-move, ELA quality, pixel cap, worker limits…).
+    pub domain: crate::analyzer::DomainOptions,
     /// Shared case folder (`--case-dir`). None = standalone run in `out_dir`.
     pub case_dir: Option<PathBuf>,
     /// Case folder only: evidence ids to examine (E0001…). With no input and no ids, every registered item.
@@ -77,6 +79,7 @@ impl Default for RunConfig {
             tsa_url: None,
             sign_cert: None,
             sign_password: None,
+            domain: crate::analyzer::DomainOptions::default(),
             case_dir: None,
             evidence_ids: vec![],
             case_role: crate::CASE_ROLE,
@@ -103,6 +106,9 @@ pub struct RunSummary {
     pub audit_head: String,
     /// {"status": "ok"|"pending"|"off", ...}
     pub timestamp: Value,
+    /// Per-item results (findings, `details` of the image analysis, outputs such as maps), in run order.
+    /// Front-ends use them to browse the outcome (GUI image viewer) without re-reading the reports from disk.
+    pub results: Vec<ItemResult>,
     /// Case folder runs: case id, role and how the items relate to the registry.
     pub case: Option<CaseInfo>,
 }
@@ -518,6 +524,8 @@ fn pipeline(
             extension: None,
             findings: vec![],
             error: None,
+            details: Value::Null,
+            outputs: vec![],
             audit_first_seq: first_seq,
             audit_last_seq: first_seq,
             evidence_id: None,
@@ -551,15 +559,58 @@ fn pipeline(
                     path: path_s.clone(),
                     hashes,
                 });
-                let a = analyze(&result.file_name(), out.bytes, &out.head);
                 result.size = out.bytes;
-                result.hashes = out.digests;
-                result.detected_type = a.detected_type;
-                result.extension = a.extension;
-                result.findings = a.findings;
+                result.hashes = out.digests.clone();
+                // Case folder: the item is compared with the registry BEFORE it is analysed, so the audit
+                // shows the continuity check first (a mismatch is a finding; the analysis still runs).
                 if let Some(l) = link.as_deref_mut() {
                     case_check_item(l, cfg.case_role, &mut result, &mut log, sink)?;
                 }
+                // Second, read-only pass by the domain analysis (whole file, in a worker for images): justified
+                // because image decoding needs the whole file; the bytes read are re-hashed and compared with
+                // the first pass. Logged as analysis_started.
+                let item_dir = report_dir.join("items").join(result.folder());
+                std::fs::create_dir_all(&item_dir).map_err(io)?;
+                log.record("analysis_started", Some(&path_s), json!({"index": item.index, "isolation": match &cfg.domain.isolation { crate::analyzer::Isolation::InProcess => "in_process", crate::analyzer::Isolation::Subprocess { .. } => "worker_process" }})).map_err(io)?;
+                let file_name = result.file_name();
+                let a = analyze_item(&crate::analyzer::AnalyzeCtx {
+                    path: &item.path,
+                    file_name: &file_name,
+                    size: out.bytes,
+                    head: &out.head,
+                    item_dir: &item_dir,
+                    opts: &cfg.domain,
+                    expected_digest: out.digests.first().map(|(a, h)| (*a, h.as_str())),
+                });
+                for o in &a.outputs {
+                    let p = item_dir.join(&o.rel_path);
+                    let digests = std::fs::File::open(&p)
+                        .and_then(|f| hash_reader(f, &cfg.algorithms, &mut |_| true));
+                    match digests {
+                        Ok(Some(d)) => {
+                            let hashes: BTreeMap<String, String> = d
+                                .digests
+                                .iter()
+                                .map(|(a, h)| (a.name().to_string(), h.clone()))
+                                .collect();
+                            log.record("output_written", Some(&path_s), json!({"index": item.index, "kind": o.kind, "file": format!("items/{}/{}", result.folder(), o.rel_path), "bytes": d.bytes, "hashes": hashes})).map_err(io)?;
+                            result.outputs.push(crate::report::OutputRecord {
+                                rel_path: o.rel_path.clone(),
+                                kind: o.kind.clone(),
+                                bytes: d.bytes,
+                                hashes,
+                            });
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            log.record("output_missing", Some(&path_s), json!({"index": item.index, "kind": o.kind, "file": o.rel_path, "error": e.to_string()})).map_err(io)?;
+                        }
+                    }
+                }
+                result.detected_type = a.detected_type;
+                result.extension = a.extension;
+                result.findings.extend(a.findings);
+                result.details = a.details;
             }
             Err(e) => {
                 errors += 1;
@@ -580,7 +631,7 @@ fn pipeline(
             }
         }
         let codes: Vec<String> = result.findings.iter().map(|f| f.code.clone()).collect();
-        result.audit_last_seq = log.record("item_analyzed", Some(&path_s), json!({"index": item.index, "detected_type": result.detected_type, "extension": result.extension, "findings": result.findings, "status": result.status()})).map_err(io)?;
+        result.audit_last_seq = log.record("item_analyzed", Some(&path_s), json!({"index": item.index, "detected_type": result.detected_type, "extension": result.extension, "findings": result.findings, "status": result.status(), "analysis": crate::analyzer::audit_summary(&result.details)})).map_err(io)?;
         sink(&Event::ItemFinished {
             index: item.index,
             path: path_s,
@@ -692,6 +743,7 @@ fn pipeline(
         jurisdiction: cfg.jurisdiction.clone(),
         signer,
         timestamp: json!({"status": "off"}),
+        item_reports_flagged_only: cfg.domain.item_reports_flagged_only,
         case: link.as_deref().map(|l| l.info(cfg.case_role)),
     };
     let log_dir_s = log_dir.display().to_string();
@@ -702,6 +754,15 @@ fn pipeline(
             log_dir: log_dir_s.clone(),
         };
         let dir = report_dir.join("items").join(r.folder());
+        if info.skips_item_reports(r) {
+            log.record(
+                "item_reports_skipped",
+                Some(&r.path.display().to_string()),
+                json!({"folder": format!("items/{}", r.folder()), "status": r.status(), "reason": "item_reports_flagged_only"}),
+            )
+            .map_err(io)?;
+            continue;
+        }
         let files = report::write_item_reports(&dir, &info, r, &audit)?;
         log.record(
             "item_reports_written",
@@ -777,6 +838,7 @@ fn pipeline(
         log_dir: log_dir.clone(),
         audit_head: String::new(),
         timestamp: info.timestamp.clone(),
+        results: Vec::new(),
         case: info.case.clone(),
     };
     log.record("run_finished", None, json!({"items": summary.items, "bytes": summary.bytes, "errors": errors, "elapsed_ms": summary.elapsed_ms, "high": summary.high, "medium": summary.medium, "low": summary.low, "info": summary.info, "cancelled": cancelled})).map_err(io)?;
@@ -795,6 +857,7 @@ fn pipeline(
     });
     Ok(RunSummary {
         audit_head: log.head().to_string(),
+        results,
         ..summary
     })
 }
@@ -812,23 +875,24 @@ fn case_check_item(
     let norm = case::normalize_path(&result.path);
     let path_s = result.path.display().to_string();
     if role == CaseRole::Intake {
-        if let Some(prev) = l.case.find_by_path(&norm) {
-            if matches!(
+        if let Some(prev) = l.case.find_by_path(&norm)
+            && matches!(
                 case::compare(&prev.hashes, &result.hashes),
                 Comparison::Mismatch { .. }
-            ) {
-                result.findings.push(
-                    Finding::new("REGISTRY_PATH_CONTENT_CHANGED", Severity::Medium)
-                        .with("previous_id", prev.evidence_id.clone()),
-                );
-            }
+            )
+        {
+            result.findings.push(
+                Finding::new("REGISTRY_PATH_CONTENT_CHANGED", Severity::Medium)
+                    .with("previous_id", prev.evidence_id.clone()),
+            );
         }
         return Ok(());
     }
     let expected = l
         .by_evidence
-        .get(&norm)
-        .and_then(|id| l.case.get(id))
+        .iter()
+        .find(|(p, _)| case::same_path(p, &norm))
+        .and_then(|(_, id)| l.case.get(id))
         .map(|e| (e.clone(), "evidence_id"))
         .or_else(|| l.case.find_by_path(&norm).map(|e| (e.clone(), "path")))
         .or_else(|| {
@@ -998,6 +1062,7 @@ mod tests {
         std::fs::write(ev.path().join("a.txt"), "same").unwrap();
         std::fs::write(ev.path().join("b.txt"), "same").unwrap();
         std::fs::write(ev.path().join("photo.jpg"), b"%PDF-1.7\n...").unwrap();
+        // photo.jpg is examined as an image (planned analyses: ANALYSIS_NOT_IMPLEMENTED, info).
         let mut events = Vec::new();
         let s = run(
             &cfg(ev.path().into(), out.path().into()),
@@ -1007,7 +1072,7 @@ mod tests {
         .unwrap();
         assert_eq!(s.items, 3);
         assert_eq!(s.medium, 1); // extension mismatch
-        assert_eq!(s.info, 2); // duplicate pair
+        assert_eq!(s.info, 3); // duplicate pair + ANALYSIS_NOT_IMPLEMENTED
         assert!(crate::audit::verify(&s.log_dir.join("audit.jsonl")).is_ok());
         for f in ["audit.log", "hashes.csv", "environment.json"] {
             assert!(s.log_dir.join(f).exists(), "{}", f);
@@ -1056,9 +1121,10 @@ mod tests {
     }
 
     fn sample_copy(dir: &Path) -> PathBuf {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/inventory");
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/sample/evidence");
         let ev = dir.join("evidence");
         std::fs::create_dir_all(&ev).unwrap();
+        // The three sample items, 1..3 in name order: acta-copia.txt, acta.txt, foto-vacaciones.jpg.
         for e in std::fs::read_dir(src).unwrap() {
             let p = e.unwrap().path();
             std::fs::copy(&p, ev.join(p.file_name().unwrap())).unwrap();
@@ -1165,7 +1231,12 @@ mod tests {
         let s = run(&a, &mut |e| events.push(e.clone()), &AtomicBool::new(false)).unwrap();
         let t = s.case.clone().unwrap().tally;
         assert_eq!((t.verified, t.mismatched, t.unregistered), (3, 0, 0));
-        assert_eq!(s.high, 0);
+        assert!(
+            !s.results
+                .iter()
+                .any(|r| r.findings.iter().any(|f| f.code.starts_with("EVIDENCE_")))
+        );
+        assert!(s.results.iter().all(|r| r.evidence_id.is_some()));
         let audit = std::fs::read_to_string(s.log_dir.join("audit.jsonl")).unwrap();
         assert!(
             audit.contains("\"case_algorithm_added\"")
@@ -1182,8 +1253,10 @@ mod tests {
         );
 
         // 4. Tampered evidence copy → high mismatch finding, analysis still runs; unregistered file → medium.
-        std::fs::write(ev.join("acta.txt"), "tampered").unwrap();
-        std::fs::write(ev.join("extra.txt"), "not registered").unwrap();
+        let mut photo = std::fs::read(ev.join("foto-vacaciones.jpg")).unwrap();
+        photo.extend_from_slice(b"\n% tampered\n");
+        std::fs::write(ev.join("foto-vacaciones.jpg"), photo).unwrap();
+        std::fs::write(ev.join("unregistered.txt"), "not registered").unwrap();
         let mut a = case_cfg(&case, CaseRole::Analysis, vec![ev.clone()]);
         a.case_id = None;
         let s = go(&a).unwrap();
@@ -1208,10 +1281,15 @@ mod tests {
         let s = go(&case_cfg(
             &case,
             CaseRole::Intake,
-            vec![ev.join("acta.txt")],
+            vec![ev.join("foto-vacaciones.jpg")],
         ))
         .unwrap();
-        assert_eq!(s.medium, 1);
+        assert!(
+            s.results[0]
+                .findings
+                .iter()
+                .any(|f| f.code == "REGISTRY_PATH_CONTENT_CHANGED")
+        );
         assert_eq!(Case::open(&case).unwrap().items.len(), 4);
         let v = case::verify_case(&case);
         assert!(v.problems.is_empty(), "{:?}", v.problems);

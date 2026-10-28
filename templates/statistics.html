@@ -45,6 +45,11 @@
 {% for row in duplicate_rows %}<tr><td class="mono">{{ row.hash }}</td><td>{% for p in row.paths %}<div>{{ p }}</div>{% endfor %}</td></tr>{% endfor %}
 </table>{% else %}<p>{{ t.none }}</p>{% endif %}
 
+<h2>{{ t.image_overview }}</h2>
+<table><tr><th>{{ t.image_overview }}</th><th>{{ t.items }}</th></tr>
+{% for row in image_rows %}<tr><td>{{ row.label }}</td><td>{{ row.count }}</td></tr>{% endfor %}
+</table>
+
 {% if case %}<h2>{{ t.case_verification }}</h2>
 <div class="kv">
   <div>{{ t.case }}</div><div><strong>{{ case.case_id }}</strong></div>
@@ -58,7 +63,7 @@
 {% endif %}
 <h2>{{ t.items }}</h2>
 <table><tr><th>#</th>{% if case %}<th>{{ t.evidence_id }}</th>{% endif %}<th>{{ t.file }}</th><th>{{ t.size }}</th><th>{{ t.status }}</th><th>{{ t.findings }}</th></tr>
-{% for it in item_rows %}<tr><td>{{ it.index }}</td>{% if case %}<td class="mono">{{ it.evidence_id or "—" }}</td>{% endif %}<td><a href="{{ it.link }}">{{ it.file_name }}</a></td><td>{{ it.size }}</td><td>{{ it.status_label }}</td><td>{{ it.finding_count }}</td></tr>{% endfor %}
+{% for it in item_rows %}<tr><td>{{ it.index }}</td>{% if case %}<td class="mono">{{ it.evidence_id or "—" }}</td>{% endif %}<td>{% if it.has_reports %}<a href="{{ it.link }}">{{ it.file_name }}</a>{% else %}{{ it.file_name }} <span class="small">({{ t.report_not_written }})</span>{% endif %}</td><td>{{ it.size }}</td><td>{{ it.status_label }}</td><td>{{ it.finding_count }}</td></tr>{% endfor %}
 </table>
 
 <h2>{{ t.limitations }}</h2>
@@ -78,5 +83,5 @@
   <div>{{ t.audit_entries }}</div><div>{{ audit.entries }}</div>
   <div>{{ t.log_dir }}</div><div class="mono">{{ audit.log_dir }}</div>
 </div>
-<footer><div class="tagline">{{ brand.tagline }}</div>{{ t.generated_by }} {{ tool.name }} {{ tool.version }} · {{ run.run_id }} · {% if signature.signed %}{{ t.signed_by }} {{ signature.by }} (PDF; {{ t.certificate_sha256 }} <span class="mono">{{ signature.certificate_sha256 }}</span>){% else %}{{ t.not_signed }}{% endif %}</footer>
+<footer><div class="tagline">{{ brand.tagline }}</div>{{ t.generated_by }} {{ tool.name }} {{ tool.version }} · {{ run.run_id }} · {% if signature.signed %}{{ t.signed_by }} {{ signature.by }} (PDF){% else %}{{ t.not_signed }}{% endif %}</footer>
 </main></body></html>

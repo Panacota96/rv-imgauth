@@ -34,41 +34,13 @@ Editing a value changes that entry's hash; deleting or re-ordering breaks `seq` 
 Verify with either implementation:
 
 ```bash
-rv-imgauth verify-log rakvor-out/logs/<RUN-ID>          # exit 0 intact, 3 broken or truncated
-python tests/verify_chain.py rakvor-out/logs/<RUN-ID>   # independent re-implementation (chain + hashes.csv)
+rv-imgauth verify-log rakvor-out/logs/<RUN-ID>          # exit 0 intact, 3 broken
+python tests/verify_chain.py rakvor-out/logs/<RUN-ID>   # independent re-implementation
 ```
 
 > The chain proves the log is **internally consistent**. On its own it does not prove *when* it was written —
-> that is what the trusted timestamp below adds — nor that it is *complete*: removing the last entries leaves a
-> shorter chain that is still valid. Storing the final `entry_hash` (printed in the statistics report) in your
-> case management system remains good practice.
-
-### Truncation: what anchors the end of the log
-
-A chain cannot vouch for its own length, so `verify-log` compares the end of the log with the records kept
-**outside** it:
-
-```mermaid
-flowchart LR
-    L["audit.jsonl<br/>entries #1 … #N"] --> V{"verify-log"}
-    T["timestamp-K.json + .tsr<br/>covers_seq K, head = hash of #K"] --> V
-    C["case-log.jsonl run_finished<br/>audit_entries M, audit_head"] --> V
-    V -->|"#K or #M missing, or another hash"| B["BROKEN: truncated (exit 3)"]
-    V -->|"the records agree"| O["OK + which entries are anchored"]
-    V -->|"no timestamp, not in a case"| N["OK + 'truncation not detectable<br/>without a timestamp or case record'"]
-```
-
-| Record | Where | What `verify-log` checks |
-| --- | --- | --- |
-| RFC 3161 timestamp | `timestamp-<K>.json` / `.tsr` next to the log | entry `#K` still exists and its `entry_hash` is the head the token signs; every `timestamp_obtained` entry still has its token file |
-| Case log | `<CASE>/case-log.jsonl`, for a run in `<CASE>/runs/<tool>/<RUN-ID>/logs` | `run_finished` of this run records `audit_entries` and `audit_head`: entry `#M` exists with that hash, and only `timestamp_obtained` follows it |
-
-The output names the last anchored entry. A standalone run timestamps the head **before** writing
-`timestamp_obtained`, `statistics_report_written` and `run_finished`, so those 3 entries are reported as
-"cannot be proven complete"; a run in a case folder is anchored to its last entry by the case log. Without either
-record `verify-log` prints `truncation not detectable without a timestamp or case record` (exit 0: nothing
-contradicts the log, but nothing vouches for its length). Deleting the timestamp files **and** the entries that
-refer to them is detectable only through the case log or a head kept elsewhere.
+> that is what the trusted timestamp below adds. Storing the final `entry_hash` (printed in the statistics report)
+> in your case management system remains good practice.
 
 ## Trusted timestamp (RFC 3161)
 
@@ -81,7 +53,7 @@ sequenceDiagram
     participant L as audit.jsonl
     participant A as TSA (RFC 3161)
     T->>L: … item_reports_written (entry #N)
-    T->>A: entry_hash of #N (the head, a SHA-256) + nonce
+    T->>A: entry #N hash as message imprint (SHA-256) + nonce
     alt reachable
         A-->>T: signed token (genTime)
         T->>L: timestamp_obtained (covers_seq N, gen_time, tsa, token_sha256)
@@ -95,10 +67,10 @@ sequenceDiagram
 - The token is stored next to the log: `timestamp-<N>.tsr` (DER) and `timestamp-<N>.json` (readable summary).
 - Offline or air-gapped: the run still completes. When the network is back, `rv-imgauth timestamp <log folder>`
   re-verifies the chain and appends `timestamp_obtained` — earlier entries are never rewritten.
-- The TSA receives the chain head itself: the `entry_hash` of entry `#N` (already a SHA-256 digest) is the
-  message imprint of the request (hash algorithm SHA-256); it is not hashed a second time.
-- `verify-log` checks each token: imprint = stored head, and entry `#N` still exists with that hash (a missing
-  entry `#N` is reported as truncation).
+- `verify-log` checks each token: its file digest, the TSA status, imprint = stored head, entry `#N` still has
+  that hash, and the TSA's CMS signature (signer certificate in the token, ESS binding, message digest, RSA
+  signature, timeStamping EKU). `--tsa-ca <CA bundle>` also validates the certificate chain; otherwise the output
+  says *chain not validated*. Revocation is not checked ([usage.md](usage.md#6-timestamps)).
 - Independent check: `openssl ts -verify -digest <head> -in timestamp-<N>.tsr -CAfile <TSA chain>`.
 - `--no-timestamp` (or `RV_NO_TIMESTAMP=1`) disables it; tests use a local TSA (`tests/fake_tsa.py`).
 - **Limitation:** a timestamp proves the log existed at that time, not that its content is true.
@@ -117,8 +89,13 @@ digests are in the audit chain, which is timestamped.
 `--jurisdiction co` (default) writes, for each item, a Colombian *registro de cadena de custodia* in Spanish
 (fields of the Fiscalía manual, Ley 906 de 2004); `--jurisdiction fr` a French *fiche de scellé / suivi* in French
 (Code de procédure pénale art. 156 ff.). An English version is always added. The form is pre-filled from the run
-(case, item, size, both digests, UTC times, tool, examiner, audit entries) and leaves signature lines for the
-physical transfers. This is a working aid, not legal advice: check it against the current official form.
+(case, item, size, both digests, UTC times, tool, examiner, audit entries). Blank cells are left to fill in by
+hand: a **persons** table (the examiner, two assistant and two witness rows, each with full name, position —
+*cargo* in Colombia, *qualité* in France —, ID document type and number, and signature) and the **transfer** rows
+(date and time, delivered by / received by with name, position, ID type and number and signature, purpose,
+condition of the packaging). `custody.json` carries the same fields as nullable values (`examiner_identity`,
+`assistants`, `witnesses`, `transfers`; schema `schemas/item-custody.schema.json`). This is a working aid, not
+legal advice: check it against the current official form.
 
 ## Actions recorded
 
@@ -131,11 +108,15 @@ physical transfers. This is a working aid, not legal advice: check it against th
 | `item_started` | each item | index, size, modified time |
 | `item_hashed` | each item | digests, bytes read, `mtime_unchanged` |
 | `item_error` | unreadable item | error message |
-| `item_analyzed` | each item | detected type, extension, findings, status |
+| `analysis_started` | each item | isolation (`worker_process` or `in_process`) |
+| `output_written` / `output_missing` | each derived file | kind, path under `items/`, size, digests (revisions, visual diffs, objects dump, embedded files) |
+| `item_analyzed` | each item | detected type, extension, findings, status; `analysis`: fingerprint databases (name, version, SHA-256), PDFium library (path, SHA-256, pinned tag), worker outcome, visual-diff status, `evidence_rehash` (second-pass digest of the parsed bytes vs the first pass) |
 | `item_cancelled` / `run_cancelled` | on cancel | processed count |
 | `duplicate_group` | after the loop | hash, item indexes |
 | `hash_register_written` | | digests of `hashes.csv` |
-| `item_reports_written` | each item | digests of every report file |
+| `item_reports_written` / `item_reports_skipped` | each item | digests of every report file / skipped with `--item-reports flagged` |
+| `signing_certificate_loaded` | with `--sign-cert` | certificate subject and SHA-256 (never the password) |
+| `timestamp_obtained` / `timestamp_pending` | before the statistics report | covered entry, head, TSA, genTime, token SHA-256 / reason |
 | `statistics_report_written` | | digests of statistics files |
 | `run_finished` / `run_failed` | last | totals, severities, elapsed |
 
@@ -159,13 +140,17 @@ flowchart LR
 
 | 27037 principle / activity | How RV ImgAuth supports it |
 | --- | --- |
-| Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash; `verify-log` checks the chain and its end against the timestamp and the case log |
+| Auditability (5.3.2) | Every action logged with actor, UTC time and chain hash |
 | Repeatability (5.3.3) | `environment.json` records exact tool and dependency versions; same input → same hashes |
-| Reproducibility (5.3.4) | Independent verifier (`tests/verify_chain.py`), standard algorithms, and a second implementation of the tool (the other profile) that numbers, hashes and verifies identically |
+| Reproducibility (5.3.4) | Independent verifier (`tests/verify_chain.py`) and standard algorithms |
 | Justifiability (5.3.5) | Every finding states what it shows and what it does **not** prove; limitations in every report |
-| Preservation (7.1.4) | Read-only access; hashes of every file and of every report produced |
+| Preservation (spoliation and tampering, 3.19 and 3.21) | Read-only access; hashes of every file and of every report produced |
 | Documentation / chain of custody | Hash register, reports, and log folder form the record of the examination |
 
 Colombian practice (Ley 906 de 2004, Manual de cadena de custodia) and French practice (Code de procédure
 pénale, art. 156 ff. for expertise) both expect the examiner to document the method and preserve integrity;
 the log folder plus the reports are that documentation for this step of the examination.
+
+The full requirement-by-requirement mapping (Colombia, France/EU, ISO/IEC 27037/27041/17025, US/UK), with
+verification marks, gaps and an examiner checklist, is in [admissibility.md](admissibility.md). Why the chain and
+the timestamp work: [theory.md](theory.md#b14-the-audit-hash-chain).

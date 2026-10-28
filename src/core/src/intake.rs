@@ -1,5 +1,3 @@
-//! Shared code: the same module is in rv-pdfauth (src/core/src/intake.rs); keep both in step.
-//!
 //! Intake by RV HashInv (`--intake hashinv`): before analysing, rv-imgauth runs the Rakvor intake tool
 //! (`rv-hashinv scan … --case-dir`) on the same evidence, so one action gives the hash inventory, the
 //! evidence registry and the image analysis in one case folder.

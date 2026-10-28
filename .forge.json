@@ -4,9 +4,7 @@
   "name": "rv-imgauth",
   "module": "rv_imgauth",
   "title": "RV ImgAuth",
-  "run_command": "scan",
-  "planned_command": "analyze",
-  "case_role": "analysis",
+  "run_command": "analyze",
   "created": "2026-10-28",
   "cli_command": [
     "cargo",
@@ -15,5 +13,8 @@
     "-p",
     "rv-imgauth-cli",
     "--"
-  ]
+  ],
+  "planned_command": "analyze",
+  "case_role": "analysis",
+  "sample_args": []
 }

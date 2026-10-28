@@ -234,6 +234,9 @@
           "report_folder": {
             "type": "string"
           },
+          "reports_written": {
+            "type": "boolean"
+          },
           "evidence_id": {
             "type": [
               "string",
@@ -269,6 +272,35 @@
         },
         "log_dir": {
           "type": "string"
+        }
+      }
+    },
+    "image_overview": {
+      "type": "object",
+      "required": [
+        "images",
+        "not_completed",
+        "item_reports",
+        "item_reports_skipped"
+      ],
+      "properties": {
+        "images": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_completed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "item_reports": {
+          "enum": [
+            "all",
+            "flagged"
+          ]
+        },
+        "item_reports_skipped": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     },

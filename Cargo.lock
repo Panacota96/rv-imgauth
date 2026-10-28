@@ -3374,6 +3374,7 @@ dependencies = [
  "predicates",
  "rpassword",
  "rv-imgauth-core",
+ "rv-imgauth-img",
  "serde_json",
  "tempfile",
  "winresource",
@@ -3389,10 +3390,12 @@ dependencies = [
  "const-oid 0.9.6",
  "der 0.7.10",
  "digest 0.11.3",
+ "libc",
  "md-5",
  "minijinja",
  "p12-keystore",
  "rsa",
+ "rv-imgauth-img",
  "serde",
  "serde_json",
  "sha1 0.11.0",
@@ -3403,6 +3406,7 @@ dependencies = [
  "tempfile",
  "ureq",
  "walkdir",
+ "windows-sys 0.61.2",
  "x509-cert 0.2.5",
  "x509-tsp",
 ]
@@ -3412,10 +3416,18 @@ name = "rv-imgauth-gui"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "png",
  "rfd",
  "rv-imgauth-core",
  "serde_json",
  "winresource",
+]
+
+[[package]]
+name = "rv-imgauth-img"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

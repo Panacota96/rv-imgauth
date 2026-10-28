@@ -13,15 +13,17 @@ pub mod audit;
 pub mod case;
 pub mod env;
 pub mod events;
+pub mod fingerprints;
 pub mod hash;
 pub mod i18n;
+pub mod imgscan;
 pub mod input;
 pub mod intake;
 pub mod report;
 pub mod run;
 pub mod time;
 pub mod trust;
-pub mod verify;
+pub mod worker;
 
 pub use case::CaseRole;
 pub use events::Event;
@@ -33,7 +35,7 @@ pub const TOOL_NAME: &str = "rv-imgauth";
 /// release never changes Cargo.lock (CI builds with --locked).
 pub const TOOL_VERSION: &str = env!("RV_VERSION");
 
-/// This tool's place in a shared case folder (see docs/case-folder.md). The reference rv-imgauth is the
-/// INTAKE tool (it registers evidence); tools scaffolded from it are ANALYSIS tools (they verify every item
-/// against the registry). The scaffold flips this one constant together with `case_role` in .forge.json.
+/// This tool's place in a shared case folder (see docs/case-folder.md). rv-hashinv is the INTAKE tool (it
+/// registers evidence); rv-imgauth is an ANALYSIS tool: it re-hashes every item and verifies it against the
+/// case registry before analysing it. Keep this constant equal to `case_role` in .forge.json.
 pub const CASE_ROLE: CaseRole = CaseRole::Analysis;

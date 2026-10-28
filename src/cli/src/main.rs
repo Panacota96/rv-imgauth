@@ -1,12 +1,13 @@
 //! rv-imgauth command-line interface. All work happens in `rv_imgauth_core`; this file only
 //! parses arguments, renders events (progress bar or JSON Lines) and maps results to exit codes.
 
+mod fingerprints;
+
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use rv_imgauth_core::trust::{self, DEFAULT_TSA};
 use rv_imgauth_core::{
     CASE_ROLE, Event, HashAlgo, RunConfig, TOOL_NAME, TOOL_VERSION, audit, case, hash, i18n, run,
-    verify,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -20,38 +21,52 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_FINDINGS: u8 = 3;
 const EXIT_CANCELLED: u8 = 130;
 
-const ABOUT: &str = "Inventory digital evidence: hash every file with one or two algorithms, detect its real type, flag anomalies and write court-ready reports with a tamper-evident audit log.";
+const ABOUT: &str = "Look for signals that images (JPEG, HEIC, PNG, WebP) were modified, with court-ready reports and a tamper-evident audit log.";
 
 const LONG_ABOUT: &str = "\
 DESCRIPTION:
-  rv-imgauth reviews a single file, a whole folder (bulk) or a list of files. For every file it:
+  rv-imgauth looks for signals that a photo or image was modified after it was captured. It
+  reviews a single file, a whole folder (bulk) or a list of files. For every file it:
     1. opens the file read-only and hashes it in one pass with one or two algorithms;
-    2. detects the real file type from its signature (magic bytes);
-    3. flags empty files, extensions that do not match the content, programs hidden under
-       another name and duplicated content;
-    4. writes a technical report and a customer-friendly summary (HTML, PDF and JSON).
-  Each run also writes a statistics report and an audit trail under <OUT>/logs/<RUN-ID>/.
-  Every action is appended to a hash-chained log that `rv-imgauth verify-log` can check later.
+    2. identifies the real file type from its signature; JPEG, HEIC, PNG and WebP images (by
+       signature or extension) are examined in an isolated worker process, which re-hashes the
+       bytes it reads and compares them with the first pass;
+    3. turns what it saw into findings (signals with a severity, what they show and what they do
+       not prove) and writes a technical review and a customer summary (HTML, PDF and JSON).
+  Planned in this build (not yet implemented; every image gets the info finding
+  ANALYSIS_NOT_IMPLEMENTED): structure and metadata checks, JPEG quantization-table
+  fingerprints, error level analysis (ELA) and noise maps, copy-move detection and comparison
+  with reference images from the same device. The options for them are accepted and audited.
+  Each run also writes a statistics report and an audit trail under <OUT>/logs/<RUN-ID>/. Every
+  action is appended to a hash-chained log that `rv-imgauth verify-log` can check later.
+  The result is a set of signals for an examiner, never a verdict that an image is authentic or
+  manipulated.
 
-  CASE FOLDER (--case-dir): Rakvor tools share one folder per case. rv-imgauth is the intake tool: it
-  registers every hashed file in evidence/registry.json (evidence ids E0001, E0002, ...) so later tools
-  can prove they examined bit-identical copies. `rv-imgauth verify-case <CASE>` checks it all.";
+  CASE FOLDER (--case-dir): Rakvor tools share one folder per case. rv-hashinv, the intake tool,
+  registers each evidence file once (evidence ids E0001, E0002, ...). rv-imgauth is an analysis tool:
+  before analysing an image it re-hashes it and verifies it against that registry, so the reports
+  prove the examined file is bit-identical to the registered one. `rv-imgauth verify-case <CASE>`
+  checks the whole case.";
 
-const SCAN_AFTER_HELP: &str = "\
+const ANALYZE_AFTER_HELP: &str = "\
 EXAMPLES:
-  Review one file (SHA-256, English reports):
-    rv-imgauth scan --input evidence/contract.pdf
+  Review one photo (SHA-256, English reports):
+    rv-imgauth analyze --input evidence/IMG_0042.jpg
   Review a folder and its subfolders with SHA-256 + MD5, Spanish reports, for case CASE-2026-014:
-    rv-imgauth scan -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014
+    rv-imgauth analyze -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014
   Review the files listed in a text file, reports in the three languages, machine-readable progress:
-    rv-imgauth scan --input-list files.txt --lang all --progress jsonl > events.jsonl
+    rv-imgauth analyze --input-list files.txt --lang all --progress jsonl > events.jsonl
+  Large batch: noise map only, no copy-move, reports only for flagged items:
+    rv-imgauth analyze -i E:\\phone-export -r --maps noise --copy-move off --item-reports flagged
+  Compare with known originals from the same camera:
+    rv-imgauth analyze -i IMG_0042.jpg --reference ref/IMG_0040.jpg --reference ref/IMG_0041.jpg
   Verify the audit log afterwards:
     rv-imgauth verify-log rakvor-out/logs/<RUN-ID>/audit.jsonl
-  Open a case folder and register the evidence (intake), then verify the whole case:
-    rv-imgauth scan -i D:\\evidence -r --case-dir E:\\CASE-014 --case CASE-014 --jurisdiction fr
+  Analyse every item registered in a case folder (after rv-hashinv intake), then verify the case:
+    rv-imgauth analyze --case-dir E:\\CASE-014
     rv-imgauth verify-case E:\\CASE-014
-  Re-examine two registered items of the case:
-    rv-imgauth scan --case-dir E:\\CASE-014 --evidence E0001,E0002
+  Analyse two registered items of the case only:
+    rv-imgauth analyze --case-dir E:\\CASE-014 --evidence E0001,E0002
 
 EXIT CODES:
   0    Completed; no high-severity finding.
@@ -60,44 +75,105 @@ EXIT CODES:
   2    Usage error (unknown option, more than two hash algorithms, unsupported language).
        With --case-dir: folder of another case or schema, --case missing when creating the
        case, unknown evidence id.
-  3    Completed with at least one high-severity finding (e.g. unreadable file, program under
-       another name, evidence that differs from the case registry), or the case folder fails
-       verification (nothing is written to it).
+  3    Completed with at least one high-severity finding (e.g. an image that could not be
+       analysed, evidence that changed during the run or differs from the case registry), or
+       the case folder fails verification (nothing is written to it).
   130  Cancelled with Ctrl+C. Partial reports and the cancellation are written to the audit log.
 
 FILES WRITTEN:
-  <OUT>/logs/<RUN-ID>/audit.jsonl         Hash-chained log of every action (one JSON object per line).
-  <OUT>/logs/<RUN-ID>/audit.log           The same actions, human-readable.
-  <OUT>/logs/<RUN-ID>/hashes.csv          Hash register: index, path, size, digests, status.
-  <OUT>/logs/<RUN-ID>/environment.json    Tool and dependency versions, OS, host, user, command line.
-  <OUT>/reports/<RUN-ID>/statistics.json  Run statistics (+ statistics.<LANG>.html and .pdf).
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/technical.json|.<LANG>.html|.<LANG>.pdf   Technical review.
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/summary.json|.<LANG>.html|.<LANG>.pdf     Customer summary.
-  <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>/custody.json|.<es|fr>.html|.pdf|.en.html|.pdf  Custody form.
-  <OUT>/logs/<RUN-ID>/timestamp-<SEQ>.tsr|.json  RFC 3161 token for the audit chain head.
-  With --case-dir <CASE>, logs/ and reports/ go to <CASE>/runs/rv-imgauth/<RUN-ID>/, plus:
-  <CASE>/case.json                        Case id, jurisdiction, creation (written once).
-  <CASE>/case-log.jsonl                   Hash-chained case log of every tool: case_created,
-                                          run_started, evidence_registered, run_finished.
-  <CASE>/evidence/registry.json|.csv      Evidence registry: E0001..., path, size, hashes.
+  <OUT>/logs/<RUN-ID>/audit.jsonl          Hash-chained log of every action (one JSON object/line).
+  <OUT>/logs/<RUN-ID>/audit.log            The same actions, human-readable.
+  <OUT>/logs/<RUN-ID>/hashes.csv           Hash register: index, path, size, digests, status.
+  <OUT>/logs/<RUN-ID>/environment.json     Tool and dependency versions, OS, host, user, arguments.
+  <OUT>/logs/<RUN-ID>/timestamp-<SEQ>.tsr  RFC 3161 token for the audit chain head (+ .json).
+  <OUT>/reports/<RUN-ID>/statistics.json   Run statistics (+ statistics.<LANG>.html and .pdf).
+  <ITEM> = <OUT>/reports/<RUN-ID>/items/<NNNNN>-<NAME>:
+  <ITEM>/technical.json|.<LANG>.html|.pdf  Technical review (image analysis, fingerprint databases,
+                                           maps, every file written for the item).
+  <ITEM>/summary.json|.<LANG>.html|.pdf    Customer summary.
+  <ITEM>/custody.json|.<es|fr|en>.html|.pdf  Chain-of-custody form.
+  <ITEM>/maps/*.png                        Analysis maps (ELA, noise, copy-move; planned in this
+                                           build).
+  Every file under <ITEM> is hashed with the selected algorithms and recorded in the audit log.
+  With --case-dir <CASE>, logs/ and reports/ go to <CASE>/runs/rv-imgauth/<RUN-ID>/, and:
+  <CASE>/case-log.jsonl                    Hash-chained case log of every tool: run_started and
+                                           run_finished of this run are appended to it.
+  <CASE>/case.json                         Case id and jurisdiction (only if the folder is new).
+  The evidence registry (<CASE>/evidence/registry.json) is read, never written, by rv-imgauth.
 
 FORENSIC NOTES:
-  - Evidence is opened read-only and never modified; modification times are compared before and after.
+  - Evidence is opened read-only and never modified; modification times are compared before and
+    after.
   - Work on a verified copy (write-blocked image or export), not on original media.
+  - Findings are signals, not a verdict: an image without findings is not proven authentic, and a
+    finding does not prove manipulation. Read \"What it does not prove\" and the Limitations
+    section.
+  - Images are analysed in a separate worker process with a time and memory limit, and images
+    larger than --max-pixels are not decoded (decompression bombs).
+  - Metadata (EXIF, XMP) and software strings are written by the device or program that saved the
+    file and can be forged; re-saving, resizing or sending through a messenger destroys most
+    traces.
   - Each audit entry stores the SHA-256 of the previous one; editing, deleting or re-ordering any
-    line is detected by `verify-log`. Removing the last lines is detected only against a record
-    kept outside the log: the RFC 3161 timestamp or, with --case-dir, the case log. Keep the log
-    folder with the reports.
-  - A file without findings is not proven authentic; read the Limitations section of each report.
-  - MD5 and SHA-1 are accepted for compatibility with older case files; pair them with SHA-256 or BLAKE3.
-  - The chain head is timestamped by an RFC 3161 authority (proves when the log existed). Offline? The run
-    finishes with `timestamp_pending`; run `rv-imgauth timestamp <LOG>` later.
-  - With --sign-cert every PDF is signed with the examiner's certificate; the password is never logged.
-  - Case folder: every tool re-verifies case-log.jsonl and the registry digest before
-    writing, and refuses a broken case (exit 3). Appends happen under case-log.lock; a lock
-    older than 10 minutes is reported as stale and never deleted automatically.
+    line is detected by `verify-log`. Keep the log folder with the reports.
+  - MD5 and SHA-1 are accepted for compatibility with older case files; pair them with SHA-256 or
+    BLAKE3.
+  - The chain head is timestamped by an RFC 3161 authority (proves when the log existed). Offline?
+    The run finishes with `timestamp_pending`; run `rv-imgauth timestamp <LOG>` later.
+  - With --sign-cert every PDF report is signed with the examiner's certificate; the password is
+    never logged.
+  - Case folder: every item is compared with the registry (by --evidence id, else by path, else
+    by content) before it is analysed; a different hash is the high finding
+    EVIDENCE_HASH_MISMATCH_WITH_CASE (the analysis still runs), a file not in the registry is
+    EVIDENCE_NOT_IN_CASE_REGISTRY (medium). If no selected algorithm is in the registry, SHA-256
+    (or another registry algorithm) is added and logged as case_algorithm_added.
+  - The case log and registry digest are re-verified before every write; a broken case is
+    refused (exit 3). Appends happen under case-log.lock; a lock older than 10 minutes is
+    reported as stale and never deleted automatically.
   - Each run's audit.jsonl records case_linked (the case-log entry it started from); the case
     log records the run's final audit head, so the two chains vouch for each other.";
+
+const FINGERPRINTS_AFTER_HELP: &str = "\
+DESCRIPTION:
+  Fingerprints recognise the camera, phone, app or editor that wrote an image (planned in this
+  build: JPEG quantization tables and software strings). Three databases are used by `analyze`:
+  the bundled starter DB, the local DB learned on this workstation and, optionally,
+  --fingerprints-db FILE. The local DB lives in
+  %LOCALAPPDATA%\\Rakvor\\rv-imgauth\\fingerprints.local.json (Windows) or
+  $XDG_DATA_HOME/rakvor/rv-imgauth/ (default ~/.local/share/rakvor/rv-imgauth/) on Linux/macOS.
+  Nothing is ever sent anywhere: learning only reads the files you name.
+
+EXAMPLES:
+  rv-imgauth fingerprints learn originals/*.jpg --label \"Phone X camera\" --category camera
+  rv-imgauth fingerprints list --db local
+  rv-imgauth fingerprints export --out lab-fingerprints-2026-10.json";
+
+const FP_LEARN_AFTER_HELP: &str = "\
+DESCRIPTION:
+  Reads each image read-only, takes what identifies the software or device that wrote it and adds
+  one entry `local-<label>` to the local database. Several files: only what all files share is
+  kept. Learning the same label again merges into the existing entry. Nothing is written if any
+  file fails. Planned in this build: image parsing is not implemented yet, so learning reports an
+  error and leaves the database unchanged.
+
+FILES WRITTEN:
+  <LOCAL-DB-FOLDER>/fingerprints.local.json    The local database (version incremented).
+  <LOCAL-DB-FOLDER>/fingerprints.audit.jsonl   Hash-chained log of every change: files and their
+                                               SHA-256, DB SHA-256 before and after, examiner, case.
+
+FORENSIC NOTES:
+  - Learn only from files whose origin you can prove (taken by you with the device, or vendor
+    samples).
+  - Software strings can be forged; a match is a signal about the software, not about a person.
+  - The DB SHA-256 printed here appears in every report that used the database.
+
+EXAMPLES:
+  rv-imgauth fingerprints learn IMG_0001.jpg --label \"Phone X camera\" --category camera
+  rv-imgauth fingerprints learn a.jpg b.jpg --label \"Messenger Y\" --category messenger --case LAB-01
+
+EXIT CODES:
+  0  Learned (or merged); DB SHA-256 before/after printed.
+  1  A file is unreadable or cannot be learned from; or the DB cannot be written.
+  2  Usage error (unknown category, missing --label).";
 
 #[derive(Parser)]
 #[command(name = TOOL_NAME, version = TOOL_VERSION, about = ABOUT, long_about = LONG_ABOUT, max_term_width = 100,
@@ -109,38 +185,45 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Hash, check and report on a file, a folder or a list of files.
-    #[command(long_about = LONG_ABOUT, after_long_help = SCAN_AFTER_HELP)]
-    Scan(Box<ScanArgs>),
-    /// Verify an audit log (audit.jsonl): edited, deleted or re-ordered entries, and truncation.
+    /// Look for signals of modification in images (a file, a folder or a list) and write the reports.
+    ///
+    /// `scan` is accepted as a hidden alias for one release so existing scripts keep working.
+    #[command(long_about = LONG_ABOUT, after_long_help = ANALYZE_AFTER_HELP, alias = "scan")]
+    Analyze(Box<AnalyzeArgs>),
+    /// Manage the local fingerprint database (learn, list, export). Offline only.
+    #[command(subcommand, after_long_help = FINGERPRINTS_AFTER_HELP)]
+    Fingerprints(FingerprintsCmd),
+    /// Verify that an audit log (audit.jsonl) has not been edited, truncated or re-ordered, and check
+    /// every RFC 3161 timestamp token of the run (imprint and the TSA's CMS signature).
     #[command(after_long_help = "\
-CHECKS:
-  - every entry links to the previous one (hash chain): an edited, deleted or re-ordered entry
-    breaks it;
-  - every timestamp token (timestamp-<SEQ>.tsr) covers the hash of the entry it names, and every
-    timestamp_obtained entry still has its token file;
-  - truncation: a chain alone cannot show that entries were removed from its end. The log must
-    still contain the entry covered by its RFC 3161 timestamp (covers_seq) and, for a run inside
-    a case folder (<CASE>/runs/<TOOL>/<RUN-ID>/logs), end with the audit head that the case log
-    recorded at run_finished (only timestamp_obtained may follow). Entries after the last
-    anchored one are listed as not provable; with neither record the output says
-    \"truncation not detectable without a timestamp or case record\".
-
 EXAMPLES:
   rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
   rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-imgauth verify-log E:\\CASE-014\\runs\\rv-imgauth\\20261019T101500Z-a1b2c3\\logs
+  rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+
+TIMESTAMP CHECKS:
+  For each timestamp-<N>.tsr: the token covers the chain head of entry N; the TSA's CMS signature is
+  valid (signer certificate in the token, ESS signing-certificate binding, message digest over the
+  TSTInfo, RSA signature, timeStamping key usage). Without --tsa-ca the output says \"chain not
+  validated\"; with it the TSA certificate must chain to a certificate of the bundle (signatures,
+  validity at the token's time, CA flag). Revocation is not checked.
 
 EXIT CODES:
-  0  The chain is intact and agrees with its timestamps and case record (if any).
-  1  The log cannot be read.
-  3  The chain is broken (an entry was edited, deleted or re-ordered), a timestamp does not
-     match, or the log is shorter than its timestamp or case record says (truncated).")]
+  0  The chain is intact and every timestamp token verifies.
+  1  The log or the --tsa-ca file cannot be read.
+  3  The chain is broken (an entry was edited, deleted or re-ordered), or a timestamp token does not
+     verify (altered token, invalid TSA signature, chain not trusted by --tsa-ca).")]
     VerifyLog {
         /// Path to audit.jsonl, or to the run's log folder that contains it.
         ///
         /// Example: rakvor-out/logs/20261019T101500Z-a1b2c3
         log: PathBuf,
+        /// CA bundle (PEM, one or more certificates, or one DER certificate) that the TSA certificate
+        /// must chain to. Obtain it from the TSA's own repository, not from the token.
+        /// Default: none (the TSA signature is checked, the chain is not validated)
+        /// Example: --tsa-ca C:\certs\tsa-roots.pem
+        #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+        tsa_ca: Option<PathBuf>,
     },
     /// Check every hash algorithm against known-answer test vectors.
     #[command(after_long_help = "\
@@ -160,7 +243,7 @@ EXAMPLES:
 EXIT CODES:
   0  Timestamp obtained and logged.
   1  The TSA could not be reached (nothing changed; try again).
-  3  The log is missing or broken: no timestamp is added.")]
+  3  The log is broken: no timestamp is added to a broken chain.")]
     Timestamp {
         /// The run's log folder (or its audit.jsonl).
         ///
@@ -182,32 +265,22 @@ EXIT CODES:
 CHECKS:
   - case-log.jsonl is an intact hash chain starting with case_created; case.json is unchanged;
   - evidence/registry.json has the SHA-256 recorded at the last registry change;
-  - every run announced in the case log has an intact audit.jsonl (and valid timestamp
-    tokens), its case_linked entry points to its run_started entry, and the audit head
-    recorded at run_finished is its final entry (only timestamp_obtained may follow);
-  - with --rehash: every registered item still reachable at its registered path is read again
-    and its digests are compared with the registry (the latest registration of a path).
+  - every run announced in the case log (by any Rakvor tool) has an intact audit.jsonl (and
+    valid timestamp tokens), its case_linked entry points to its run_started entry, and the
+    audit head recorded at run_finished is its final entry (only timestamp_obtained may follow).
 
 EXAMPLES:
   rv-imgauth verify-case E:\\CASE-014
-  rv-imgauth verify-case E:\\CASE-014 --rehash
 
 EXIT CODES:
-  0  The case folder is intact (warnings, e.g. a run still in progress or an item not
-     reachable for --rehash, are printed).
+  0  The case folder is intact (warnings, e.g. a run still in progress, are printed).
   1  The folder is not a case folder (no case.json).
-  3  At least one check failed: the case was edited, truncated or re-ordered, or (--rehash)
-     an evidence file differs from the registry.")]
+  3  At least one check failed: the case was edited, truncated or re-ordered.")]
     VerifyCase {
         /// The case folder (the one that holds case.json).
         ///
         /// Example: E:\CASE-014
         case: PathBuf,
-        /// Also re-hash every registered item still reachable and compare it with the registry.
-        /// Default: off (only the registry's digest is checked)
-        /// Example: --rehash
-        #[arg(long, verbatim_doc_comment)]
-        rehash: bool,
     },
     /// Print the full help of every command as Markdown (used to generate docs/usage-cli.md).
     #[command(hide = true)]
@@ -225,10 +298,11 @@ enum ProgressMode {
 }
 
 #[derive(Args)]
-struct ScanArgs {
+struct AnalyzeArgs {
     /// File or folder to review. Repeat for several.
     ///
-    /// Folders are reviewed one level deep unless --recursive is given. Symbolic links are not followed.
+    /// Folders are reviewed one level deep unless --recursive is given. Symbolic links are not
+    /// followed.
     /// Default: none (required unless --input-list, --case-dir or --evidence is given).
     /// Example: --input D:\evidence --input E:\phone-export\chat.txt
     #[arg(
@@ -281,8 +355,9 @@ struct ScanArgs {
     )]
     out: PathBuf,
 
-    /// Report language: en, es, fr, or all (one HTML and PDF per language). JSON is language-neutral.
+    /// Report language: en, es, fr, or all (one HTML and PDF per language).
     ///
+    /// JSON reports are language-neutral.
     /// Default: en. Example: --lang es   or   --lang all
     #[arg(
         short,
@@ -321,8 +396,9 @@ struct ScanArgs {
     )]
     progress: ProgressMode,
 
-    /// Chain-of-custody form per item: co (Colombia, Fiscalía style, Spanish) or fr (France, scellés, French).
-    /// An English copy is always added. With --case-dir the case's jurisdiction applies.
+    /// Chain-of-custody form per item: co (Colombia, Fiscalía style, Spanish) or fr (France,
+    /// scellés, French). An English copy is always added. With --case-dir the case's
+    /// jurisdiction applies.
     /// Default: co
     /// Example: --jurisdiction fr
     #[arg(short, long, value_name = "CC", default_value = "co", value_parser = ["co", "fr"], verbatim_doc_comment, hide_default_value = true, hide_possible_values = true)]
@@ -340,8 +416,9 @@ struct ScanArgs {
     #[arg(long, env = "RV_NO_TIMESTAMP", value_parser = clap::builder::FalseyValueParser::new(), verbatim_doc_comment, hide_env = true)]
     no_timestamp: bool,
 
-    /// Examiner's certificate (.p12/.pfx, RSA) used to sign every PDF report. The password is read from
-    /// the environment variable named by --sign-pass-env, or asked for interactively.
+    /// Examiner's certificate (.p12/.pfx, RSA) used to sign every PDF report. The password is
+    /// read from the environment variable named by --sign-pass-env, or asked for interactively
+    /// on the terminal without echo.
     /// Default: none (PDFs are not signed)
     /// Example: --sign-cert C:\certs\ana-ruiz.p12
     #[arg(long, value_name = "P12", verbatim_doc_comment)]
@@ -359,16 +436,102 @@ struct ScanArgs {
     )]
     sign_pass_env: String,
 
-    /// Shared case folder that links the Rakvor tools of one case (created with --case if missing).
-    /// Outputs go to <DIR>/runs/rv-imgauth/<RUN-ID>/; every hashed file is registered in
-    /// <DIR>/evidence/registry.json; the run is recorded in <DIR>/case-log.jsonl.
-    /// With no --input, every registered item is examined again.
+    /// Analysis maps written per image under <ITEM>/maps/: ela, noise (comma-separated or
+    /// repeated), or none. Planned in this build: accepted and audited, no map is written yet.
+    /// Default: ela,noise
+    /// Example: --maps noise   or   --maps none
+    #[arg(
+        long,
+        value_name = "LIST",
+        value_delimiter = ',',
+        default_value = "ela,noise",
+        value_parser = ["ela", "noise", "none"],
+        verbatim_doc_comment,
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    maps: Vec<String>,
+
+    /// Look for regions copied and pasted within the same image (copy-move): on or off.
+    /// Planned in this build.
+    /// Default: on
+    /// Example: --copy-move off
+    #[arg(
+        long,
+        value_enum,
+        value_name = "ON|OFF",
+        default_value = "on",
+        verbatim_doc_comment,
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    copy_move: OnOff,
+
+    /// JPEG quality used to re-compress each image for error level analysis, 1 to 100.
+    /// Planned in this build.
+    /// Default: 95
+    /// Example: --ela-quality 90
+    #[arg(long, value_name = "Q", default_value_t = 95, value_parser = clap::value_parser!(u8).range(1..=100), verbatim_doc_comment, hide_default_value = true)]
+    ela_quality: u8,
+
+    /// Images with more pixels than this are not decoded (protection against decompression
+    /// bombs), 1000000 to 2000000000.
+    /// Default: 100000000 (100 megapixels)
+    /// Example: --max-pixels 250000000
+    #[arg(long, value_name = "N", default_value_t = 100_000_000, value_parser = clap::value_parser!(u64).range(1_000_000..=2_000_000_000), verbatim_doc_comment, hide_default_value = true)]
+    max_pixels: u64,
+
+    /// Reference image (a known original from the same device) to compare with. Repeat for
+    /// several. Read-only; its SHA-256 is recorded. Planned in this build.
+    /// Default: none
+    /// Example: --reference ref/IMG_0040.jpg --reference ref/IMG_0041.jpg
+    #[arg(long = "reference", value_name = "FILE", verbatim_doc_comment)]
+    references: Vec<PathBuf>,
+
+    /// Seconds a worker process may spend on one image before it is stopped (PARSER_FAILED).
+    /// Default: 120
+    /// Example: --worker-timeout 600
+    #[arg(long, value_name = "SECS", default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..=86400), verbatim_doc_comment, hide_default_value = true)]
+    worker_timeout: u64,
+
+    /// Memory limit of one worker process in MiB (address space on Linux/macOS, job on Windows).
+    /// Default: 2048
+    /// Example: --worker-memory 4096
+    #[arg(long, value_name = "MB", default_value_t = 2048, value_parser = clap::value_parser!(u64).range(128..=1048576), verbatim_doc_comment, hide_default_value = true)]
+    worker_memory: u64,
+
+    /// Extra fingerprint database (JSON, as written by `fingerprints export`),
+    /// used with the bundled and local databases. Its name, version and SHA-256 are reported.
+    /// Default: none (bundled starter DB + local learned DB)
+    /// Example: --fingerprints-db case-014-fingerprints.json
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    fingerprints_db: Option<PathBuf>,
+
+    /// Per-item report files for every item (all) or only for items with findings above info
+    /// (flagged). Skipped items are still listed in the statistics report; each skip is audited.
+    /// Default: all
+    /// Example: --item-reports flagged
+    #[arg(
+        long,
+        value_enum,
+        value_name = "WHICH",
+        default_value = "all",
+        verbatim_doc_comment,
+        hide_default_value = true,
+        hide_possible_values = true
+    )]
+    item_reports: ItemReports,
+
+    /// Shared case folder that links the Rakvor tools of one case (see docs/case-folder.md).
+    /// Every item is verified against <DIR>/evidence/registry.json (written by the intake tool,
+    /// rv-hashinv) before it is analysed; outputs go to <DIR>/runs/rv-imgauth/<RUN-ID>/ and the
+    /// run is recorded in <DIR>/case-log.jsonl. With no --input, every registered item is analysed.
     /// Default: none (standalone run in --out)
-    /// Example: --case-dir E:\CASE-014 --case CASE-014
+    /// Example: --case-dir E:\CASE-014
     #[arg(long, value_name = "DIR", verbatim_doc_comment)]
     case_dir: Option<PathBuf>,
 
-    /// Registered evidence ids to examine (needs --case-dir), comma-separated or repeated.
+    /// Registered evidence ids to analyse (needs --case-dir), comma-separated or repeated.
     /// Default: none (the --input files, or every registered item)
     /// Example: --evidence E0001,E0007
     #[arg(
@@ -379,14 +542,161 @@ struct ScanArgs {
         verbatim_doc_comment
     )]
     evidence: Vec<String>,
+
+    /// Register the evidence with the intake tool first: hashinv runs RV HashInv
+    /// (`rv-hashinv scan --case-dir`) on the same --input/--input-list, so the case gets its hash
+    /// inventory, hash reports and evidence registry from rv-hashinv itself; then every item is
+    /// analysed and verified against that registry. Needs --case-dir; not with --evidence.
+    /// rv-hashinv is searched in: --hashinv-exe, RV_HASHINV, next to rv-imgauth, the RV HashInv
+    /// install folder, PATH. Its path, version and SHA-256 go into this run's audit log.
+    /// Default: none. Example: --case-dir E:\CASE-014 --case CASE-014 -i D:\evidence -r --intake hashinv
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = Intake::None,
+        requires = "case_dir",
+        hide_default_value = true,
+        hide_possible_values = true,
+        verbatim_doc_comment
+    )]
+    intake: Intake,
+
+    /// rv-hashinv executable for --intake hashinv (needs version 0.3.0 or later).
+    /// Default: searched (see --intake). Example: --hashinv-exe "C:\Tools\RV HashInv\rv-hashinv.exe"
+    #[arg(long, value_name = "EXE", verbatim_doc_comment)]
+    hashinv_exe: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum Intake {
+    /// The case registry already exists (rv-hashinv was run before), or no case folder.
+    None,
+    /// Run rv-hashinv on the same evidence first.
+    Hashinv,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OnOff {
+    On,
+    Off,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ItemReports {
+    All,
+    Flagged,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DbChoice {
+    Local,
+    Starter,
+    All,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ExportChoice {
+    Local,
+    Starter,
+}
+
+#[derive(Subcommand)]
+enum FingerprintsCmd {
+    /// Learn a device, app or editor from known-original images and add it to the local database.
+    #[command(after_long_help = FP_LEARN_AFTER_HELP)]
+    Learn {
+        /// Known-original images made with the device or tool to learn (read-only; never modified).
+        /// Default: none (at least one is required)
+        /// Example: originals/IMG_0001.jpg originals/IMG_0002.jpg
+        #[arg(value_name = "IMAGE", required = true, verbatim_doc_comment)]
+        files: Vec<PathBuf>,
+        /// Name of the tool as it should appear in reports.
+        /// Default: none (required)
+        /// Example: --label "Phone X camera"
+        #[arg(long, value_name = "TEXT", verbatim_doc_comment)]
+        label: String,
+        /// Category: camera, os, app, editor, messenger or library.
+        /// Default: none (required)
+        /// Example: --category camera
+        #[arg(long, value_name = "CAT", value_parser = rv_imgauth_core::fingerprints::CATEGORIES, verbatim_doc_comment, hide_possible_values = true)]
+        category: String,
+        /// Case the originals come from, written in the entry's source and the audit log.
+        /// Default: none
+        /// Example: --case CASE-2026-014
+        #[arg(short, long = "case", value_name = "ID", verbatim_doc_comment)]
+        case_id: Option<String>,
+        /// Examiner written in the audit log.
+        /// Default: the operating-system user name
+        /// Example: --actor "Ana Ruiz"
+        #[arg(short, long, value_name = "NAME", verbatim_doc_comment)]
+        actor: Option<String>,
+    },
+    /// List the entries of the fingerprint databases with their version and SHA-256.
+    #[command(after_long_help = "\
+EXAMPLES:
+  rv-imgauth fingerprints list
+  rv-imgauth fingerprints list --db local
+
+EXIT CODES:
+  0  Listed.
+  1  The local database cannot be read.")]
+    List {
+        /// Which database: local (learned on this workstation), starter (bundled) or all.
+        /// Default: all
+        /// Example: --db local
+        #[arg(
+            long,
+            value_enum,
+            value_name = "DB",
+            default_value = "all",
+            verbatim_doc_comment,
+            hide_default_value = true,
+            hide_possible_values = true
+        )]
+        db: DbChoice,
+    },
+    /// Write a database to a JSON file (for --fingerprints-db elsewhere, or for disclosure).
+    #[command(after_long_help = "\
+EXAMPLES:
+  rv-imgauth fingerprints export --out lab-fingerprints-2026-10.json
+  rv-imgauth fingerprints export --db starter --out starter.json
+
+EXIT CODES:
+  0  Written; its SHA-256 is printed.
+  1  The output already exists (never overwritten) or the local database does not exist.")]
+    Export {
+        /// File to create. An existing file is never overwritten.
+        /// Default: none (required)
+        /// Example: --out lab-fingerprints-2026-10.json
+        #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+        out: PathBuf,
+        /// Which database: local or starter.
+        /// Default: local
+        /// Example: --db starter
+        #[arg(
+            long,
+            value_enum,
+            value_name = "DB",
+            default_value = "local",
+            verbatim_doc_comment,
+            hide_default_value = true,
+            hide_possible_values = true
+        )]
+        db: ExportChoice,
+    },
 }
 
 fn main() -> ExitCode {
+    // Worker child (image analysis in an isolated process): dispatched before clap sees the arguments.
+    if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
+        std::process::exit(rv_imgauth_core::worker::worker_main());
+    }
     let cli = Cli::parse();
     ExitCode::from(match cli.command {
-        Command::Scan(a) => scan(*a),
-        Command::VerifyLog { log } => verify_log(log),
-        Command::VerifyCase { case, rehash } => verify_case(case, rehash),
+        Command::Analyze(a) => analyze(*a),
+        Command::Fingerprints(f) => fingerprints_cmd(f),
+        Command::VerifyLog { log, tsa_ca } => verify_log(log, tsa_ca),
+        Command::VerifyCase { case } => verify_case(case),
         Command::SelfTest => self_test(),
         Command::Timestamp {
             log,
@@ -402,13 +712,53 @@ fn main() -> ExitCode {
 
 fn usage_error(msg: &str) -> u8 {
     eprintln!(
-        "error: {}\n\nFor more information, try 'rv-imgauth scan --help'.",
+        "error: {}\n\nFor more information, try 'rv-imgauth analyze --help'.",
         msg
     );
     EXIT_USAGE
 }
 
-fn scan(a: ScanArgs) -> u8 {
+fn fingerprints_cmd(f: FingerprintsCmd) -> u8 {
+    let r = match f {
+        FingerprintsCmd::Learn {
+            files,
+            label,
+            category,
+            case_id,
+            actor,
+        } => fingerprints::learn(&fingerprints::LearnRequest {
+            files: &files,
+            label: &label,
+            category: &category,
+            case_id: case_id.as_deref(),
+            actor: &actor.unwrap_or_else(rv_imgauth_core::env::os_user),
+        }),
+        FingerprintsCmd::List { db } => fingerprints::list(match db {
+            DbChoice::Local => "local",
+            DbChoice::Starter => "starter",
+            DbChoice::All => "all",
+        }),
+        FingerprintsCmd::Export { out, db } => fingerprints::export(
+            match db {
+                ExportChoice::Local => "local",
+                ExportChoice::Starter => "starter",
+            },
+            &out,
+        ),
+    };
+    match r {
+        Ok(text) => {
+            let _ = writeln!(std::io::stdout(), "{}", text.trim_end());
+            EXIT_OK
+        }
+        Err(e) => {
+            eprintln!("error: {}", e);
+            EXIT_ERROR
+        }
+    }
+}
+
+fn analyze(a: AnalyzeArgs) -> u8 {
     let mut algos = Vec::new();
     for h in &a.hashes {
         match HashAlgo::parse(h) {
@@ -428,11 +778,48 @@ fn scan(a: ScanArgs) -> u8 {
         Ok(l) => l,
         Err(e) => return usage_error(&e),
     };
+
+    if let Some(db) = &a.fingerprints_db
+        && !db.is_file()
+    {
+        eprintln!("error: fingerprint database not found: {}", db.display());
+        return EXIT_ERROR;
+    }
+    if let Some(r) = a.references.iter().find(|r| !r.is_file()) {
+        eprintln!("error: reference image not found: {}", r.display());
+        return EXIT_ERROR;
+    }
+    let maps: Vec<String> = if a.maps.iter().any(|m| m == "none") {
+        if a.maps.len() > 1 {
+            return usage_error("--maps none cannot be combined with other maps");
+        }
+        vec![]
+    } else {
+        let mut m: Vec<String> = Vec::new();
+        for x in &a.maps {
+            if !m.contains(x) {
+                m.push(x.clone());
+            }
+        }
+        m
+    };
     let evidence_ids = match case::parse_evidence_ids(&a.evidence) {
         Ok(ids) => ids,
         Err(e) => return usage_error(&e.message),
     };
-    if let Some(dir) = &a.case_dir {
+    let intake = a.intake == Intake::Hashinv;
+    if intake && !a.evidence.is_empty() {
+        return usage_error(
+            "--intake hashinv registers new evidence: it cannot be combined with --evidence",
+        );
+    }
+    if intake && a.inputs.is_empty() && a.input_list.is_none() {
+        return usage_error(
+            "--intake hashinv needs the evidence to register (--input or --input-list)",
+        );
+    }
+    // With --intake the case may not exist yet: rv-hashinv creates it, and the core checks it afterwards.
+    if let Some(dir) = a.case_dir.as_ref().filter(|_| !intake) {
         // Case problems found before the run map to their own exit codes (2 usage, 3 broken case).
         if let Err(e) = case::preflight(dir, a.case_id.as_deref(), &evidence_ids) {
             return match e.exit_code() {
@@ -474,11 +861,25 @@ fn scan(a: ScanArgs) -> u8 {
             .as_ref()
             .and_then(|_| password(&a.sign_pass_env)),
         sign_cert: a.sign_cert.clone(),
+        domain: rv_imgauth_core::analyzer::DomainOptions {
+            maps,
+            copy_move: a.copy_move == OnOff::On,
+            ela_quality: a.ela_quality,
+            max_pixels: a.max_pixels,
+            references: a.references.clone(),
+            worker_timeout_s: a.worker_timeout,
+            worker_memory_mb: a.worker_memory,
+            fingerprints_db: a.fingerprints_db.clone(),
+            item_reports_flagged_only: a.item_reports == ItemReports::Flagged,
+            isolation: std::env::current_exe()
+                .map(|exe| rv_imgauth_core::analyzer::Isolation::Subprocess { exe })
+                .unwrap_or_default(),
+        },
         case_dir: a.case_dir.clone(),
+        intake_hashinv: intake,
+        hashinv_exe: a.hashinv_exe.clone(),
         evidence_ids,
         case_role: CASE_ROLE,
-        intake_hashinv: false,
-        hashinv_exe: None,
     };
 
     let bar = match a.progress {
@@ -525,6 +926,22 @@ fn scan(a: ScanArgs) -> u8 {
                     "warning: {}: {}",
                     path.as_deref().unwrap_or("-"),
                     message
+                )),
+                Event::IntakeStarted { version, path, .. } => {
+                    b.println(format!("intake: rv-hashinv {version} ({path}) registers the evidence"))
+                }
+                Event::IntakeProgress { done, total, .. } => {
+                    b.set_message(format!("intake {}/{} files", done, total))
+                }
+                Event::IntakeFinished {
+                    run_id,
+                    exit_code,
+                    items,
+                    report_dir,
+                    ..
+                } => b.println(format!(
+                    "intake: rv-hashinv run {run_id} finished (exit {exit_code}, {items} files); hash reports: {}",
+                    report_dir.as_deref().unwrap_or("-")
                 )),
                 Event::Cancelled { .. } => b.println("cancelled: writing partial reports..."),
                 Event::Timestamp { status, reason, .. } if status != "ok" => b.println(format!(
@@ -581,11 +998,9 @@ fn scan(a: ScanArgs) -> u8 {
                     let t = &c.tally;
                     let _ = writeln!(
                         std::io::stdout(),
-                        "  case:   {} ({}) registered {} (new {}), verified {}, mismatched {}, not in registry {}",
+                        "  case:   {} ({}) verified {}, mismatched {}, not in registry {}",
                         c.case_id,
                         c.role,
-                        t.registered,
-                        t.added,
                         t.verified,
                         t.mismatched,
                         t.unregistered
@@ -609,8 +1024,9 @@ fn password(env: &str) -> Option<String> {
     }
     use std::io::IsTerminal;
     if std::io::stdin().is_terminal() {
-        // No echo: the password never appears on screen or in a terminal recording.
-        return rpassword::prompt_password("Certificate password: ").ok();
+        // Read from the controlling terminal with echo switched off (/dev/tty on Unix, CONIN$ on Windows):
+        // the password never appears on screen, in a terminal scroll-back or in a screen recording.
+        return rpassword::prompt_password("Certificate password (input hidden): ").ok();
     }
     None
 }
@@ -621,13 +1037,6 @@ fn timestamp(log: PathBuf, tsa_url: String, actor: Option<String>) -> u8 {
     } else {
         log
     };
-    if !dir.join("audit.jsonl").is_file() {
-        eprintln!(
-            "error: no audit log at {}: nothing to timestamp",
-            dir.join("audit.jsonl").display()
-        );
-        return EXIT_FINDINGS;
-    }
     let mut audit_log =
         match audit::AuditLog::resume(&dir, &actor.unwrap_or_else(rv_imgauth_core::env::os_user)) {
             Ok(l) => l,
@@ -655,46 +1064,53 @@ fn timestamp(log: PathBuf, tsa_url: String, actor: Option<String>) -> u8 {
     }
 }
 
-fn verify_log(log: PathBuf) -> u8 {
+fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
     let path = if log.is_dir() {
         log.join("audit.jsonl")
     } else {
         log
     };
-    let v = match verify::verify_log(&path) {
-        Ok(v) => v,
+    let anchors = match tsa_ca.as_deref().map(trust::load_ca_bundle).transpose() {
+        Ok(a) => a,
         Err(e) => {
             eprintln!("error: {}", e);
             return EXIT_ERROR;
         }
     };
-    if v.problems.is_empty() {
-        println!(
-            "OK  {} entries, chain intact: {}",
-            v.entries,
-            path.display()
-        );
-        for t in &v.timestamps {
-            println!("    {}", t);
+    let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let mut tokens = Vec::new();
+    let checked = audit::verify(&path).and_then(|n| {
+        let v = trust::verify_timestamps_with(&dir, &audit::heads(&path), anchors.as_deref());
+        tokens = v.tokens;
+        if v.problems.is_empty() {
+            Ok(n)
+        } else {
+            Err(v.problems)
         }
-        println!("    {}", v.truncation);
-    } else {
-        println!("BROKEN  {}", path.display());
-        for p in &v.problems {
-            println!("  - {}", p);
+    });
+    match checked {
+        Ok(n) => {
+            println!("OK  {} entries, chain intact: {}", n, path.display());
+            for t in tokens {
+                println!("    {}", t);
+            }
+            EXIT_OK
         }
-    }
-    for w in &v.warnings {
-        println!("  warning: {}", w);
-    }
-    if v.problems.is_empty() {
-        EXIT_OK
-    } else {
-        EXIT_FINDINGS
+        Err(problems) if problems.len() == 1 && problems[0].starts_with("cannot open") => {
+            eprintln!("error: {}", problems[0]);
+            EXIT_ERROR
+        }
+        Err(problems) => {
+            println!("BROKEN  {}", path.display());
+            for p in problems {
+                println!("  - {}", p);
+            }
+            EXIT_FINDINGS
+        }
     }
 }
 
-fn verify_case(dir: PathBuf, rehash: bool) -> u8 {
+fn verify_case(dir: PathBuf) -> u8 {
     if !dir.join(case::CASE_FILE).is_file() {
         eprintln!(
             "error: {} is not a case folder (no {})",
@@ -703,8 +1119,7 @@ fn verify_case(dir: PathBuf, rehash: bool) -> u8 {
         );
         return EXIT_ERROR;
     }
-    let mut v = case::verify_case(&dir);
-    let rehashed = rehash.then(|| case::rehash_registry(&dir, &mut v));
+    let v = case::verify_case(&dir);
     if v.problems.is_empty() {
         println!(
             "OK  case {}: {} case-log entries, {} registered items, {} runs verified: {}",
@@ -714,12 +1129,6 @@ fn verify_case(dir: PathBuf, rehash: bool) -> u8 {
             v.runs,
             dir.display()
         );
-        if let Some(r) = &rehashed {
-            println!(
-                "    re-hashed {} of {} registered items: {} match the registry",
-                r.checked, r.registered, r.matched
-            );
-        }
         for w in &v.warnings {
             println!("  warning: {}", w);
         }
@@ -728,12 +1137,6 @@ fn verify_case(dir: PathBuf, rehash: bool) -> u8 {
         println!("BROKEN  case {}: {}", v.case_id, dir.display());
         for p in &v.problems {
             println!("  - {}", p);
-        }
-        if let Some(r) = &rehashed {
-            println!(
-                "    re-hashed {} of {} registered items: {} match the registry",
-                r.checked, r.registered, r.matched
-            );
         }
         for w in &v.warnings {
             println!("  warning: {}", w);
@@ -769,7 +1172,7 @@ fn docs_cli() -> String {
     let mut out = String::from(
         "# Command-line reference\n\n<!-- Generated by `rv-imgauth docs-cli`. Do not edit by hand: CI fails if this file differs. -->\n\n",
     );
-    out.push_str("```mermaid\nflowchart LR\n  A[rv-imgauth] --> B[scan]\n  A --> C[verify-log]\n  A --> D[self-test]\n  A --> T[timestamp]\n  A --> V[verify-case]\n  T --> E\n  B --> E[(logs/RUN-ID)]\n  B --> F[(reports/RUN-ID)]\n  B -. --case-dir .-> K[(CASE folder)]\n  V --> K\n  C --> E\n```\n\n");
+    out.push_str("```mermaid\nflowchart LR\n  A[rv-imgauth] --> B[analyze]\n  A --> C[verify-log]\n  A --> D[self-test]\n  A --> T[timestamp]\n  A --> V[verify-case]\n  A --> G[fingerprints]\n  G --> H[(local fingerprint DB)]\n  H --> B\n  T --> E\n  B --> E[(logs/RUN-ID)]\n  B --> F[(reports/RUN-ID)]\n  B -. --case-dir .-> K[(CASE folder)]\n  V --> K\n  C --> E\n```\n\n");
     out.push_str(&format!(
         "## rv-imgauth\n\n```text\n{}\n```\n\n",
         root.render_long_help().to_string().trim_end()
@@ -787,6 +1190,24 @@ fn docs_cli() -> String {
             name,
             sub.render_long_help().to_string().trim_end()
         ));
+        let nested: Vec<String> = sub
+            .get_subcommands()
+            .filter(|c| !c.is_hide_set() && c.get_name() != "help")
+            .map(|c| c.get_name().to_string())
+            .collect();
+        for child in nested {
+            let mut c = sub
+                .find_subcommand_mut(&child)
+                .expect("subcommand")
+                .clone()
+                .bin_name(format!("rv-imgauth {} {}", name, child));
+            out.push_str(&format!(
+                "### rv-imgauth {} {}\n\n```text\n{}\n```\n\n",
+                name,
+                child,
+                c.render_long_help().to_string().trim_end()
+            ));
+        }
     }
     out
 }

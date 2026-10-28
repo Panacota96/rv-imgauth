@@ -7,7 +7,7 @@ language. Each exists as JSON (machine-readable, language-neutral) plus HTML and
 ```mermaid
 flowchart TB
     RUN["Run"] --> S["statistics.json<br/>statistics.LANG.html · .pdf"]
-    RUN --> I1["items/00001-acta.txt/"]
+    RUN --> I1["items/00001-broken-xref.pdf/"]
     RUN --> I2["items/00002-…/"]
     I1 --> T1["technical.json<br/>technical.LANG.html · .pdf"]
     I1 --> C1["summary.json<br/>summary.LANG.html · .pdf"]
@@ -19,10 +19,8 @@ plus its English version — see [forensic-audit.md](forensic-audit.md#chain-of-
 
 **Brand.** HTML and PDF reports carry the Rakvor header band (RV mark, descriptor
 *FORENSICS | INCIDENT RESPONSE | SECURITY* and the tagline in the report language) on a light, printable page.
-When `--sign-cert` is used, each report (PDF and HTML) shows the signer's certificate subject and its SHA-256
-fingerprint — the value logged at `signing_certificate_loaded`, also in the JSON reports as
-`run.pdf_signer_certificate_sha256` — and each PDF carries a digital signature that Acrobat or
-`pyhanko sign validate` can check (the test suite validates every signed PDF with pyHanko). The statistics report shows the trusted timestamp (or a warning
+When `--sign-cert` is used, each PDF shows the signer and certificate fingerprint and carries a digital signature
+that Acrobat or `pyhanko sign validate` can check. The statistics report shows the trusted timestamp (or a warning
 that it is pending).
 
 **Size.** Item reports never list every other file: duplicate partners are capped at 10 names
@@ -43,6 +41,14 @@ that it is pending).
 | Audit entries covering the item | | ✔ (`#first – #last`) | |
 | Limitations | ✔ | ✔ | |
 | Status and next step | | ✔ | ✔ |
+| PDF overview: PDFs with >1 revision, with signatures, with online-editor fingerprints | ✔ | | |
+| Revision history table (byte range, Info/XMP dates, producer, time since previous, objects added/changed/deleted, pages changed, signed by) + timeline | | ✔ | |
+| Signatures, fonts, producer fingerprints (DB name, version, SHA-256), visual comparison (thumbnails → PNG), extracted files with digests | | ✔ | |
+| Plain-language document history ("saved 3 times; last change 9 days after creation, with an online editor") | | | ✔ |
+
+With `--item-reports flagged`, items whose status is `ok` get no technical, summary or custody files; their
+derived outputs (e.g. `objects.json`) are still written and audited. They stay listed in the statistics report
+(`reports_written: false`) and the audit log records `item_reports_skipped`.
 
 ## Status and severity
 
@@ -56,27 +62,54 @@ pie showData
 
 | Severity | Examples | Item status |
 | --- | --- | --- |
-| High | UNREADABLE, EXECUTABLE_CONTENT | `problem` (exit code 3) |
-| Medium | EXTENSION_MISMATCH | `attention` |
-| Low | — | `attention` |
-| Informational | EMPTY_FILE, DUPLICATE | `ok` |
+| High | CONTENT_CHANGED_AFTER_SIGNATURE, SIGNATURE_INTEGRITY_FAILED, PARSER_FAILED, UNREADABLE | `problem` (exit code 3) |
+| Medium | VISUAL_CHANGE_BETWEEN_REVISIONS, METADATA_INFO_XMP_MISMATCH, EXTENSION_MISMATCH | `attention` |
+| Low | INCREMENTAL_UPDATES, HYBRID_XREF, EMBEDDED_FILES | `attention` |
+| Informational | REVISION_TIME_GAP, SIGNATURE_PRESENT_TRUST_NOT_VERIFIED, DUPLICATE | `ok` |
 
 ## Findings catalogue
 
-| Code | Shows | Does not prove |
-| --- | --- | --- |
-| `EMPTY_FILE` | The file has 0 bytes | Whether it was emptied on purpose |
-| `EXTENSION_MISMATCH` | Name and content signature disagree | Intent to hide anything |
-| `EXECUTABLE_CONTENT` | A program is stored under a non-program name | That the program is malicious |
-| `DUPLICATE` | Identical content (same primary hash) in several files | Who copied it or when |
-| `UNREADABLE` | Reading failed, with the OS error | That the file is damaged |
-| `EVIDENCE_HASH_MISMATCH_WITH_CASE` (high, case folder) | The file differs from the evidence registered at intake | Who changed it, when, or why |
-| `EVIDENCE_NOT_IN_CASE_REGISTRY` (medium, case folder) | No registered item has this path or content | That the file is altered or irrelevant |
-| `REGISTRY_PATH_CONTENT_CHANGED` (medium, intake) | A registered path now holds other content (new evidence id) | Which version is the original |
+Every code, its severity, and the rule behind it. The full *shows / does not prove* wording is in
+`i18n/en.json` (es, fr); what to check next and what not to conclude: [usage.md](usage.md#5-interpreting-each-finding);
+the exact rules and thresholds: [theory.md](theory.md).
 
-With `--case-dir` every report shows the item's **evidence id** (`E0001`…), the statistics report adds a *Case
-folder* section (registered / verified / mismatched / not registered), and the custody form uses the case id, the
-evidence id and the intake date — see [case-folder.md](case-folder.md).
+| Code | Severity | Raised when |
+| --- | :-: | --- |
+| `EMPTY_FILE` | info | the file has 0 bytes |
+| `EXTENSION_MISMATCH` | medium | name and content signature disagree |
+| `EXECUTABLE_CONTENT` | high | a program is stored under a non-program name |
+| `DUPLICATE` | info | identical content (primary hash) in several files |
+| `UNREADABLE` | high | reading failed (OS error) |
+| `NOT_A_PDF` | info | a `.pdf` name without `%PDF-` in the first 1024 bytes |
+| `PARSER_FAILED` | high | the isolated PDF analysis did not complete (timeout, memory, crash, bad output) |
+| `EVIDENCE_CHANGED_DURING_ANALYSIS` | high | the bytes the worker parsed (re-hashed) differ from the digest of the hashing pass |
+| `ENCRYPTED_PARTIAL_ANALYSIS` | info | the PDF is encrypted; content checks skipped |
+| `INCREMENTAL_UPDATES` | low | more than one revision |
+| `VISUAL_CHANGE_BETWEEN_REVISIONS` | medium | rendered pages of consecutive revisions differ, or pages were added/removed |
+| `VISUAL_DIFF_SKIPPED` | info | the visual comparison could not run (reason given) |
+| `METADATA_INFO_XMP_MISMATCH` | medium | Info and XMP disagree on producer, creator or dates (final revision) |
+| `MODDATE_BEFORE_CREATIONDATE` | high | a modification date earlier than the creation date (Info or XMP) |
+| `REVISION_TIME_GAP` | info | consecutive revisions dated at least 1 hour apart |
+| `REVISION_DATE_NOT_MONOTONIC` | medium | a revision is dated earlier than the revision before it |
+| `PRODUCER_CHANGED_BETWEEN_REVISIONS` | medium | the Info producer changes between consecutive revisions |
+| `EDITOR_FINGERPRINT` | medium | a revision was saved by a known PDF editor |
+| `ONLINE_EDITOR_OR_UNLOCKER` | high | a revision was saved by an online editor or protection-removal tool |
+| `PRODUCER_STRUCTURE_MISMATCH` | medium | the structure differs from what the declared producer writes |
+| `UNKNOWN_PRODUCER` | info | a producer string not in the databases used |
+| `XREF_OFFSETS_INCONSISTENT` | medium | cross-reference data does not point at its objects, or startxref is wrong |
+| `HYBRID_XREF` | low | a classic xref table plus an `/XRefStm` stream |
+| `DATA_AFTER_FINAL_EOF` | medium | non-whitespace bytes after the last `%%EOF` |
+| `SIGNATURE_INTEGRITY_FAILED` | high | digest mismatch, invalid signature value or a ByteRange not covering exactly one revision |
+| `SIGNATURE_PRESENT_TRUST_NOT_VERIFIED` | info | every signature (trust is never validated) |
+| `CONTENT_CHANGED_AFTER_SIGNATURE` | high | a later revision changes page content or structure |
+| `DOCMDP_VIOLATION` | high | later changes exceed the certification permission level |
+| `JAVASCRIPT_PRESENT` | medium | JavaScript actions or name tree |
+| `LAUNCH_ACTION` | high | a `/Launch` action |
+| `EMBEDDED_FILES` | low | attachments |
+| `INVISIBLE_TEXT` | medium | text drawn invisibly on a page (render mode 3/7, white or transparent fill) |
+| `TEXT_OVER_SCANNED_IMAGE` | medium | a page mostly covered by one image also contains text |
+| `FONT_ADDED_IN_LATER_REVISION` | medium | a font first appears in a later revision and is used by page content |
+| `SCANNED_PAGES_STRUCTURE_ONLY` | info | pages that are a single large image without text |
 
 Wording lives in `i18n/en.json`, `es.json`, `fr.json` (same keys in all three — enforced by a test).
 

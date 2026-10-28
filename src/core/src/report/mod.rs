@@ -3,6 +3,7 @@
 //!
 //! HTML and PDF are rendered from the same view model (`*_context`), so they never disagree.
 
+pub mod imgview;
 pub mod pdf;
 
 use crate::analyzer::{Finding, Severity};
@@ -21,14 +22,32 @@ pub const SCHEMA_TECHNICAL: &str = "rakvor.item-technical/1";
 pub const SCHEMA_SUMMARY: &str = "rakvor.item-summary/1";
 
 /// Run-level limitations, always printed (what this tool cannot tell you).
-pub const LIMITATIONS: [&str; 4] = [
+pub const LIMITATIONS: [&str; 7] = [
     "SIGNATURE_TABLE_LIMITED",
     "TIMESTAMPS_FROM_FILESYSTEM",
     "CLEAN_RESULT_IS_NOT_AUTHENTICITY",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY",
+    "NO_FINDING_IS_NOT_AUTHENTICITY",
+    "FINGERPRINT_DB_COVERAGE",
+    "IMAGE_ANALYSES_PLANNED",
 ];
+/// Limitations of one item: the run-level list plus the item's own (`details.limitation`, set by an analysis
+/// that could not run in full for this item).
+pub fn item_limitations(it: &ItemResult) -> Vec<String> {
+    let mut out: Vec<String> = LIMITATIONS.iter().map(|l| l.to_string()).collect();
+    if let Some(code) = it.details["limitation"].as_str()
+        && !out.iter().any(|l| l == code)
+    {
+        out.push(code.to_string());
+    }
+    out
+}
+
 pub const SCHEMA_CUSTODY: &str = "rakvor.item-custody/1";
 const BLANK_TRANSFER_ROWS: usize = 6;
+/// Persons section of the custody form: the examiner, then this many assistant and witness rows.
+const ASSISTANT_ROWS: usize = 2;
+const WITNESS_ROWS: usize = 2;
 
 /// Custody form language per jurisdiction; an English copy is always added.
 pub fn custody_langs(jurisdiction: &str) -> Vec<String> {
@@ -55,8 +74,18 @@ pub struct RunInfo {
     pub signer: Option<std::sync::Arc<crate::trust::PdfSigner>>,
     /// {"status": "ok"|"pending"|"off", ...}
     pub timestamp: Value,
+    /// `--item-reports flagged`: no per-item report files for items whose status is ok (they are still
+    /// listed in the statistics report and the audit log records the skip).
+    pub item_reports_flagged_only: bool,
     /// Set when the run works in a shared case folder (`--case-dir`).
     pub case: Option<CaseInfo>,
+}
+
+impl RunInfo {
+    /// True when this item gets no report files (`--item-reports flagged` and status ok).
+    pub fn skips_item_reports(&self, it: &ItemResult) -> bool {
+        self.item_reports_flagged_only && it.status() == "ok"
+    }
 }
 
 /// Counts of how the run's items relate to the case registry.
@@ -100,6 +129,9 @@ pub struct ItemResult {
     pub extension: Option<String>,
     pub findings: Vec<Finding>,
     pub error: Option<String>,
+    /// Domain data from the analysis (Analysis::details) and the files it wrote (with digests).
+    pub details: serde_json::Value,
+    pub outputs: Vec<OutputRecord>,
     pub audit_first_seq: u64,
     pub audit_last_seq: u64,
     /// Case folder only: evidence id (E0001…), relation to the registry and intake date.
@@ -107,6 +139,15 @@ pub struct ItemResult {
     /// registered | already_registered | verified | mismatch | not_in_registry
     pub case_status: Option<String>,
     pub intake_utc: Option<String>,
+}
+
+/// A file written by the analysis, after the pipeline hashed and audited it.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct OutputRecord {
+    pub rel_path: String,
+    pub kind: String,
+    pub bytes: u64,
+    pub hashes: BTreeMap<String, String>,
 }
 
 impl ItemResult {
@@ -233,8 +274,7 @@ fn base(c: &Catalog, run: &RunInfo) -> serde_json::Map<String, Value> {
     m.insert("logo_svg".into(), json!(LOGO_SVG));
     m.insert(
         "signature".into(),
-        json!({"signed": run.signer.is_some(), "by": run.signer.as_ref().map(|s| s.subject.clone()).unwrap_or_default(),
-               "certificate_sha256": run.signer.as_ref().map(|s| s.fingerprint_sha256.clone()).unwrap_or_default()}),
+        json!({"signed": run.signer.is_some(), "by": run.signer.as_ref().map(|s| s.subject.clone()).unwrap_or_default()}),
     );
     let mut ts = run.timestamp.clone();
     if !ts.is_object() {
@@ -342,6 +382,7 @@ pub fn statistics_context(
             json!({"index": it.index, "file_name": it.file_name(), "size": it.size, "finding_count": it.findings.len(),
                    "evidence_id": it.evidence_id,
                    "status": it.status(), "status_label": c.label(&format!("status_{}", it.status())),
+                   "has_reports": !run.skips_item_reports(it),
                    "link": format!("items/{}/technical.{}.html", it.folder(), lang)})
         })
         .collect();
@@ -351,6 +392,16 @@ pub fn statistics_context(
     m.insert("type_rows".into(), json!(type_rows));
     m.insert("duplicate_rows".into(), json!(duplicate_rows));
     m.insert("item_rows".into(), json!(item_rows));
+    let ov = imgview::image_overview(items);
+    let skipped = items.iter().filter(|it| run.skips_item_reports(it)).count();
+    m.insert(
+        "image_rows".into(),
+        json!([
+            {"label": c.label("images_analyzed"), "count": ov["images"]},
+            {"label": c.label("images_not_completed"), "count": ov["not_completed"]},
+            {"label": c.label("item_reports_skipped"), "count": skipped},
+        ]),
+    );
     m.insert("case".into(), case_view(run));
     m.insert(
         "audit".into(),
@@ -392,6 +443,15 @@ pub fn item_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &AuditRef
     let c = catalog(lang);
     let mut m = base(c, run);
     m.insert("item".into(), item_view(c, it));
+    m.insert(
+        "limitations".into(),
+        json!(
+            item_limitations(it)
+                .iter()
+                .map(|l| c.limitation(l))
+                .collect::<Vec<_>>()
+        ),
+    );
     m.insert("case".into(), case_view(run));
     m.insert(
         "hash_rows".into(),
@@ -415,6 +475,8 @@ pub fn item_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &AuditRef
         "audit".into(),
         json!({"head": audit.head, "entries": audit.entries, "log_dir": audit.log_dir}),
     );
+    m.insert("image".into(), imgview::image_view(c, it));
+    m.insert("extracted".into(), imgview::extracted_view(it));
     Value::Object(m)
 }
 
@@ -445,8 +507,7 @@ fn run_json(run: &RunInfo) -> Value {
     json!({"run_id": run.run_id, "case_id": run.case_id, "actor": run.actor, "frontend": run.frontend,
            "algorithms": run.algorithms, "langs": run.langs, "started_utc": run.started_utc,
            "finished_utc": run.finished_utc, "elapsed_ms": run.elapsed_ms, "cancelled": run.cancelled,
-           "jurisdiction": run.jurisdiction, "pdf_signed_by": run.signer.as_ref().map(|s| s.subject.clone()),
-           "pdf_signer_certificate_sha256": run.signer.as_ref().map(|s| s.fingerprint_sha256.clone())})
+           "jurisdiction": run.jurisdiction, "pdf_signed_by": run.signer.as_ref().map(|s| s.subject.clone())})
 }
 
 pub fn statistics_json(
@@ -472,6 +533,14 @@ pub fn statistics_json(
             .entry(it.detected_type.clone().unwrap_or_else(|| "unknown".into()))
             .or_default() += 1;
     }
+    let mut ov = imgview::image_overview(items);
+    ov["item_reports"] = json!(if run.item_reports_flagged_only {
+        "flagged"
+    } else {
+        "all"
+    });
+    ov["item_reports_skipped"] =
+        json!(items.iter().filter(|it| run.skips_item_reports(it)).count());
     json!({
         "schema": SCHEMA_STATISTICS,
         "tool": {"name": run.tool_name, "version": run.tool_version},
@@ -481,7 +550,9 @@ pub fn statistics_json(
         "duplicate_groups": duplicate_groups(items).into_iter().map(|(h, idx)| json!({"hash": h, "items": idx.iter().map(|&i| items[i].index).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "case": run.case.as_ref().map(|c| c.to_json()),
         "items": items.iter().map(|it| json!({"index": it.index, "evidence_id": it.evidence_id, "path": it.path.display().to_string(), "size": it.size, "status": it.status(),
-              "findings": it.findings.iter().map(|f| f.code.clone()).collect::<Vec<_>>(), "report_folder": format!("items/{}", it.folder())})).collect::<Vec<_>>(),
+              "findings": it.findings.iter().map(|f| f.code.clone()).collect::<Vec<_>>(), "report_folder": format!("items/{}", it.folder()),
+              "reports_written": !run.skips_item_reports(it)})).collect::<Vec<_>>(),
+        "image_overview": ov,
         "limitations": LIMITATIONS,
         "audit": {"head": audit.head, "entries": audit.entries, "log_dir": audit.log_dir},
         "timestamp": if run.timestamp.is_object() { run.timestamp.clone() } else { json!({"status": "off"}) },
@@ -500,8 +571,10 @@ pub fn technical_json(run: &RunInfo, it: &ItemResult) -> Value {
                  "status": it.case_status, "intake_utc": it.intake_utc})),
         "hashes": it.hashes.iter().map(|(a, h)| (a.name().to_string(), json!(h))).collect::<serde_json::Map<_, _>>(),
         "findings": findings_json(it, &run.langs),
-        "limitations": LIMITATIONS,
+        "limitations": item_limitations(it),
         "audit": {"first_seq": it.audit_first_seq, "last_seq": it.audit_last_seq},
+        "image": imgview::image_json(it),
+        "extracted_files": imgview::extracted_json(it),
     })
 }
 
@@ -553,13 +626,7 @@ fn header(ctx: &Value, title_key: &str, subtitle: String) -> Vec<Block> {
 fn signature_row(ctx: &Value) -> (String, String) {
     let t = |k: &str| s(ctx, &format!("t.{}", k));
     let v = if ctx["signature"]["signed"].as_bool() == Some(true) {
-        format!(
-            "{} {} ({} {})",
-            t("signed_by"),
-            s(ctx, "signature.by"),
-            t("certificate_sha256"),
-            s(ctx, "signature.certificate_sha256")
-        )
+        format!("{} {}", t("signed_by"), s(ctx, "signature.by"))
     } else {
         t("not_signed")
     };
@@ -670,6 +737,13 @@ pub fn statistics_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         }
         b.push(Block::Space(4.0));
     }
+    b.push(Block::Heading(t("image_overview")));
+    b.push(Block::Kv(
+        arr(ctx, "image_rows")
+            .iter()
+            .map(|r| (s(r, "label"), s(r, "count")))
+            .collect(),
+    ));
     if ctx["case"].is_object() {
         b.push(Block::Heading(t("case_verification")));
         let mut rows = vec![(t("case"), s(ctx, "case.case_id"))];
@@ -734,6 +808,66 @@ pub fn statistics_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
     finish(ctx, &t("title_statistics"), &b, run)
 }
 
+fn table(header: Vec<String>, widths: &[f32], rows: &[Value], keys: &[&str]) -> Block {
+    Block::Table {
+        header,
+        widths: widths.to_vec(),
+        rows: rows
+            .iter()
+            .map(|r| keys.iter().map(|k| s(r, k)).collect())
+            .collect(),
+    }
+}
+
+/// Image analysis status, fingerprint databases and maps, then every file the analysis wrote.
+fn image_blocks(ctx: &Value) -> Vec<Block> {
+    let t = |k: &str| s(ctx, &format!("t.{}", k));
+    let mut b = Vec::new();
+    let iv = &ctx["image"];
+    if iv.is_object() {
+        b.push(Block::Heading(t("image_analysis")));
+        b.push(Block::Kv(vec![(t("status"), s(iv, "status_label"))]));
+        b.push(Block::Heading(t("fingerprint_dbs")));
+        b.push(table(
+            vec![
+                t("fp_role"),
+                t("fp_db"),
+                t("fp_version"),
+                t("fp_entries"),
+                t("fp_status"),
+                "SHA-256".into(),
+            ],
+            &[7.0, 12.0, 9.0, 8.0, 7.0, 40.0],
+            arr(iv, "db_rows"),
+            &["role", "name", "version", "entries", "status", "sha256"],
+        ));
+        b.push(Block::Heading(t("analysis_maps")));
+        let maps = arr(iv, "maps");
+        if maps.is_empty() {
+            b.push(Block::Para(t("maps_none")));
+        } else {
+            for m in maps {
+                b.push(Block::Bullet(s(m, "href")));
+            }
+        }
+    }
+    let ex = arr(ctx, "extracted");
+    if !ex.is_empty() {
+        b.push(Block::Heading(t("extracted_files")));
+        for e in ex {
+            b.push(Block::Kv(vec![(
+                format!("{} ({}, {} B)", s(e, "href"), s(e, "kind"), s(e, "bytes")),
+                arr(e, "digests")
+                    .iter()
+                    .map(|d| d.as_str().unwrap_or_default().to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            )]));
+        }
+    }
+    b
+}
+
 pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
     let t = |k: &str| s(ctx, &format!("t.{}", k));
     let mut b = header(
@@ -794,6 +928,7 @@ pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
             ],
         });
     }
+    b.extend(image_blocks(ctx));
     b.push(Block::Heading(t("method")));
     b.push(Block::Para(t("method_text")));
     b.push(Block::Heading(t("audit")));
@@ -887,8 +1022,19 @@ pub fn custody_context(lang: &str, run: &RunInfo, it: &ItemResult, audit: &Audit
     cu["jurisdiction_label"] = json!(c.ui(&format!("jur_{}", j)));
     cu["operation_text"] = json!(crate::i18n::fill(&get("operation_text"), &params));
     cu["blank_rows"] = json!((0..BLANK_TRANSFER_ROWS).collect::<Vec<_>>());
+    cu["persons_note"] = json!(get(&format!("persons_note_{}", j)));
+    cu["person_rows"] = json!(custody_person_roles(&get, &run.actor));
     ctx["custody"] = cu;
     ctx
+}
+
+/// First-column labels of the persons table: "Examiner: <name>", then assistants and witnesses (blank rows
+/// for name, position, ID type and number, signature — filled in by hand).
+fn custody_person_roles(get: &dyn Fn(&str) -> String, actor: &str) -> Vec<String> {
+    let mut v = vec![format!("{}: {}", get("examiner"), actor)];
+    v.extend(std::iter::repeat_n(get("role_assistant"), ASSISTANT_ROWS));
+    v.extend(std::iter::repeat_n(get("role_witness"), WITNESS_ROWS));
+    v
 }
 
 /// The case registry id (E0001…) when the run is linked to a case, else "<RUN-ID>-<NNNNN>".
@@ -908,6 +1054,10 @@ pub fn custody_json(run: &RunInfo, it: &ItemResult) -> Value {
         "item": {"index": it.index, "path": it.path.display().to_string(), "file_name": it.file_name(), "size": it.size},
         "hashes": it.hashes.iter().map(|(a, h)| (a.name().to_string(), json!(h))).collect::<serde_json::Map<_, _>>(),
         "examiner": run.actor,
+        // Identification fields of the official forms, completed by hand on the printed form (null here).
+        "examiner_identity": {"name": run.actor, "position": null, "id_type": null, "id_number": null},
+        "assistants": [],
+        "witnesses": [],
         "operations": [{"tool": run.tool_name, "version": run.tool_version, "start_utc": run.started_utc, "end_utc": run.finished_utc,
                         "audit_first_seq": it.audit_first_seq, "audit_last_seq": it.audit_last_seq}],
         "transfers": [],
@@ -951,6 +1101,25 @@ pub fn custody_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
         Block::Heading(c("operations")),
         Block::Para(c("operation_text")),
         Block::Kv(vec![(c("examiner"), s(ctx, "run.actor"))]),
+        Block::Heading(c("persons")),
+        Block::Note(c("persons_note")),
+        Block::Grid {
+            header: vec![
+                c("role"),
+                c("full_name"),
+                c("position"),
+                c("id_type"),
+                c("id_number"),
+                c("signature_line"),
+            ],
+            widths: vec![105.0, 100.0, 75.0, 70.0, 70.0, 75.0],
+            rows: 0,
+            row_h: 28.0,
+            labels: arr(&ctx["custody"], "person_rows")
+                .iter()
+                .map(|v| v.as_str().unwrap_or_default().to_string())
+                .collect(),
+        },
         Block::Heading(c("transfers")),
         Block::Grid {
             header: vec![
@@ -963,6 +1132,7 @@ pub fn custody_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
             widths: vec![80.0, 120.0, 120.0, 80.0, 95.0],
             rows: BLANK_TRANSFER_ROWS,
             row_h: 30.0,
+            labels: vec![],
         },
         Block::Heading(c("observations")),
         Block::Grid {
@@ -970,6 +1140,7 @@ pub fn custody_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
             widths: vec![495.0],
             rows: 2,
             row_h: 30.0,
+            labels: vec![],
         },
         Block::SignLines(vec![
             format!(
@@ -981,6 +1152,7 @@ pub fn custody_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
             format!("{} \u{2014} {}", c("received_by"), c("signature_line")),
         ]),
     ];
+    // b[3] = the item key/value block (case, evidence id, description, location).
     if let Some(Block::Kv(rows)) = b.get_mut(3) {
         if s(ctx, "run.case_id").is_empty() {
             rows[0].1 = String::new();
@@ -1016,13 +1188,17 @@ pub fn pretty(v: &Value) -> Vec<u8> {
     s.into_bytes()
 }
 
-/// Writes the six (or more, with several languages) report files of one item. Returns {file: digests}.
+/// Writes the six (or more, with several languages) report files of one item. Returns {file: digests};
+/// an empty map, writing nothing, when [`RunInfo::skips_item_reports`] (the caller audits the skip).
 pub fn write_item_reports(
     dir: &Path,
     run: &RunInfo,
     it: &ItemResult,
     audit: &AuditRef,
 ) -> Result<serde_json::Map<String, Value>, String> {
+    if run.skips_item_reports(it) {
+        return Ok(serde_json::Map::new());
+    }
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {}", dir.display(), e))?;
     let algos = &run.algorithms;
     let mut files = serde_json::Map::new();

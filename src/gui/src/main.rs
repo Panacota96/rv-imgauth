@@ -4,6 +4,10 @@
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    // Worker child (image analysis in an isolated process): dispatched before eframe starts.
+    if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
+        std::process::exit(rv_imgauth_core::worker::worker_main());
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             // Title-bar and taskbar icon (the .exe file icon comes from build.rs).
@@ -14,7 +18,7 @@ fn main() -> eframe::Result {
                 .expect("bundled icon is a valid PNG"),
             )
             .with_title("RV ImgAuth — Rakvor")
-            .with_inner_size([860.0, 720.0])
+            .with_inner_size([1100.0, 900.0])
             .with_min_inner_size([640.0, 520.0])
             .with_drag_and_drop(true),
         // wgpu falls back to a software adapter (WARP on Windows), so the GUI also runs on

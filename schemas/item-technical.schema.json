@@ -274,6 +274,104 @@
         }
       }
     },
+    "image": {
+      "description": "Image analysis (null when the item is not an image). Sections per analysis are added as the analyses are implemented.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "analysis",
+        "fingerprint_dbs",
+        "maps"
+      ],
+      "properties": {
+        "analysis": {
+          "description": "not_implemented (this build), completed or not_completed (worker failure, unreadable file).",
+          "type": "string"
+        },
+        "parser": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "options": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "fingerprint_dbs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "role",
+              "status"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "evidence_rehash": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "worker": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "maps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "extracted_files": {
+      "description": "Every file the analysis wrote in the item folder, with its digests (also in the audit log).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "rel_path",
+          "kind",
+          "bytes",
+          "hashes"
+        ],
+        "properties": {
+          "rel_path": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hashes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{32,128}$"
+            }
+          }
+        }
+      }
+    },
     "case": {
       "type": [
         "object",

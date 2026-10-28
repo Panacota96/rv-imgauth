@@ -3,21 +3,25 @@
 # RV ImgAuth
 
 <!-- forge:description -->
-**Finds the signals of modification in images.** RV ImgAuth checks JPEG, HEIC, PNG and WebP files — structure, metadata, compression fingerprints, double compression, error-level and noise maps, copy-move — and reports what each signal shows and what it does not prove.
+**Finds the signals of modification in PDF documents.** RV ImgAuth extracts every saved revision of a PDF, compares them visually, checks metadata, producer fingerprints, fonts, signatures and hidden content, and reports what each signal shows and what it does not prove.
 <!-- /forge:description -->
 
 [![CI](https://github.com/Panacota96/rv-imgauth/actions/workflows/ci.yml/badge.svg)](https://github.com/Panacota96/rv-imgauth/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Rakvor%20source--auditable-6B00FF)
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D6)
 
+![Revision viewer: revision 1 vs 2 of a synthetic invoice, the changed amount highlighted](docs/images/gui-revision-viewer.png)
+
 ```mermaid
 flowchart LR
     A[/"File, folder<br/>or list"/] --> B["Hash<br/>1–2 algorithms, one read"]
-    B --> C["Detect real type<br/>(signatures)"]
-    C --> D["Findings<br/>mismatch · executable · empty · duplicate"]
+    B --> W["Isolated worker<br/>per PDF"]
+    W --> C["Revisions<br/>byte-exact prefixes"]
+    C --> V["Visual diff<br/>PDFium, boxes"]
+    W --> M["Metadata · fingerprints<br/>fonts · signatures · content"]
+    V & M --> D["Findings<br/>shows / does not prove"]
     D --> E[["Reports<br/>statistics + per item"]]
-    B -.-> L[("Audit log<br/>hash-chained")]
-    C -.-> L
+    B -.-> L[("Audit log<br/>hash-chained, timestamped")]
     D -.-> L
     E -.-> L
 ```
@@ -37,12 +41,13 @@ flowchart LR
 | | |
 | --- | --- |
 | **Two ways to use it** | `rv-imgauth` (command line) and `rv-imgauth-gui` (Windows 10/11 desktop app). Same engine, same results. |
+| **PDF analysis** | Every saved revision extracted byte-exact, pages of consecutive revisions compared visually (PDFium), Info vs XMP metadata and dates, producer/editor fingerprints, fonts, signatures and DocMDP, JavaScript, attachments, invisible text — each PDF in an isolated worker process. How it works: [docs/theory.md](docs/theory.md). |
 | **Single or bulk** | One file, many files, whole folders (`--recursive`) or a list file (`--input-list`). |
 | **Hashing** | Choose 1 or 2 of md5, sha1, sha256, sha512, sha3-256, blake3. Both are computed in the same read. |
 | **Progress** | Progress bar, elapsed time, throughput and estimated time remaining (CLI and GUI). Cancel at any time. |
 | **Auditable** | Every action goes to `logs/<RUN-ID>/audit.jsonl`, where each entry carries the hash of the previous one. `verify-log` detects any edit. |
 | **Reports** | A statistics report per run, and for **each file** a technical review and a customer summary — HTML, PDF and JSON, in English, Spanish or French. |
-| **Case folder** | `--case-dir` links the Rakvor tools of one case: rv-imgauth (the intake tool) registers each file as `E0001`, `E0002`, … so later tools prove they examined bit-identical copies; `verify-case` checks the whole folder. See [docs/case-folder.md](docs/case-folder.md). |
+| **Case folder** | `--case-dir` links the Rakvor tools of one case: each PDF is re-hashed and verified against the evidence registry written at intake by rv-hashinv (`E0001`, …) before it is analysed; see [docs/case-folder.md](docs/case-folder.md). |
 
 ## Install
 
@@ -51,9 +56,10 @@ flowchart LR
 - `rv-imgauth-<version>-windows-x64-setup.exe` — installer (Start-menu shortcut, adds the CLI to PATH), or
 - `rv-imgauth-<version>-windows-x64.zip` — portable: unzip and run, nothing is installed.
 
-Check the download before use (see [SECURITY.md](SECURITY.md#verifying-a-release)).
+Check the download before use: SHA-256, provenance attestation, Authenticode and the PDFium library, step by
+step in [docs/installation.md](docs/installation.md) (summary in [SECURITY.md](SECURITY.md#verifying-a-release)).
 
-**From source** (any OS, Rust 1.85+):
+**From source** (any OS, Rust 1.88+ for the CLI, 1.95+ for the GUI; the pinned build compiler is in `rust-toolchain.toml`; auditors: [docs/installation.md](docs/installation.md#9-build-from-source-for-auditors)):
 
 ```bash
 cargo build --release
@@ -67,11 +73,17 @@ cargo build --release
 rv-imgauth self-test
 
 # Review a folder with SHA-256 + MD5, reports in Spanish, for case CASE-2026-014
-rv-imgauth scan -i D:\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014 --actor "Ana Ruiz"
+rv-imgauth analyze -i D:\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014 --actor "Ana Ruiz"
 
 # French case: custody form in French + English, every PDF signed with your certificate
 $env:RV_SIGN_PASSWORD = Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlainText
-rv-imgauth scan -i D:\evidence -r --jurisdiction fr --sign-cert C:\certs\examiner.p12 --lang fr
+rv-imgauth analyze -i D:\evidence -r --jurisdiction fr --sign-cert C:\certs\examiner.p12 --lang fr
+
+# Large batch: no visual comparison, item reports only for flagged files
+rv-imgauth analyze -i E:\mailbox-export -r --visual-diff off --item-reports flagged
+
+# Teach the tool an editor from files you made with it (local DB, nothing is sent anywhere)
+rv-imgauth fingerprints learn made-with-editor.pdf --label "Editor X" --category online_editor
 
 # Later, prove the log was not altered (also checks the RFC 3161 timestamp)
 rv-imgauth verify-log rakvor-out\logs\<RUN-ID>
@@ -98,6 +110,9 @@ flowchart TB
     IT --> T["technical.json / .LANG.html / .LANG.pdf"]
     IT --> S["summary.json / .LANG.html / .LANG.pdf"]
     IT --> K["custody.json / custody.es|fr + .en .html/.pdf"]
+    IT --> RV["revisions/rev-NN.pdf — byte-exact prefixes"]
+    IT --> VI["visual/rev-AA-vs-BB-page-NNN.png"]
+    IT --> OB["objects.json, embedded/"]
     LOGS --> L5["timestamp-N.tsr — RFC 3161 token"]
 ```
 
@@ -113,17 +128,18 @@ flowchart TB
 
 | Page | For |
 | --- | --- |
-| [docs/usage.md](docs/usage.md) | End-to-end case walkthrough: intake, analysis, `verify-case`, reading every output, troubleshooting |
-| [docs/installation.md](docs/installation.md) | Installing and verifying a release (SHA256SUMS, provenance, Authenticode), building from source for auditors |
-| [docs/theory.md](docs/theory.md) | Why each step works: plain-language part for clients and courts, expert part with algorithms and real values |
-| [docs/admissibility.md](docs/admissibility.md) | Colombia, France/EU, ISO/IEC and US/UK requirements mapped to the tool, gap list, examiner checklist |
+| [docs/theory.md](docs/theory.md) | Why each process works: plain-language part for clients, lawyers and judges; algorithms, thresholds and references for examiners and opposing experts |
+| [docs/admissibility.md](docs/admissibility.md) | Reliability argument and requirements of Colombia, France/EU, ISO and US/UK mapped to tool features, gap list, examiner checklist (for counsel review) |
+| [docs/installation.md](docs/installation.md) | Installing on Windows 10/11, verifying the release (SHA-256, provenance, Authenticode, PDFium), offline use, building from source |
+| [docs/usage.md](docs/usage.md) | End-to-end case walkthrough, reading the outputs, interpreting each finding, timestamps, signing, verifying a run, troubleshooting |
 | [docs/usage-cli.md](docs/usage-cli.md) | Every command and option (generated from `--help`) |
 | [docs/usage-gui.md](docs/usage-gui.md) | Using the desktop app |
 | [docs/architecture.md](docs/architecture.md) | How the engine, CLI and GUI fit together |
+| [docs/case-folder.md](docs/case-folder.md) | Shared case folder: verifying each PDF against the rv-hashinv evidence registry (`--case-dir`, `verify-case`) |
 | [docs/forensic-audit.md](docs/forensic-audit.md) | Audit trail, hash chain, evidence handling, ISO/IEC 27037 mapping |
 | [docs/reports.md](docs/reports.md) | Report kinds, fields, JSON schemas, languages |
-| [docs/case-folder.md](docs/case-folder.md) | Shared case folder: evidence registry, case log, intake vs analysis tools, `verify-case` |
 | [docs/development.md](docs/development.md) | Building, testing, CI/CD and releasing |
+| [docs/release-process.md](docs/release-process.md) | Windows packages, code signing and GitHub releases, step by step |
 | [docs/adr/](docs/adr/) | Architecture decisions (e.g. why Rust) |
 
 ## Project layout
@@ -131,7 +147,9 @@ flowchart TB
 ```text
 rv-imgauth/
 ├── src/
-│   ├── core/      engine library: input, hashing, analysis, audit log, reports (never prints)
+│   ├── pdf/       PDF parser and findings (no unsafe code, never writes files)
+│   ├── render/    PDFium rendering and pixel diff
+│   ├── core/      engine library: input, hashing, worker, analysis, audit log, reports (never prints)
 │   ├── cli/       rv-imgauth command line (clap)
 │   └── gui/       rv-imgauth-gui desktop app (egui); state.rs holds all testable rules
 ├── templates/     HTML report templates + CSS (Jinja2/minijinja compatible)
