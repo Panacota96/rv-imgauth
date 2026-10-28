@@ -646,6 +646,7 @@
     "col_offset": "Position",
     "col_length": "Longueur",
     "pixel_at": "Pixel",
-    "metadata_empty": "Le fichier ne contient aucune balise de métadonnées."
+    "metadata_empty": "Le fichier ne contient aucune balise de métadonnées.",
+    "review_log_failed": "Impossible d'écrire le journal de revue de cette exécution ; la consultation sera consignée dans le journal d'audit de la prochaine exécution :"
   }
 }

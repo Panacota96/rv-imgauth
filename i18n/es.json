@@ -646,6 +646,7 @@
     "col_offset": "Desplazamiento",
     "col_length": "Longitud",
     "pixel_at": "Píxel",
-    "metadata_empty": "El archivo no contiene etiquetas de metadatos."
+    "metadata_empty": "El archivo no contiene etiquetas de metadatos.",
+    "review_log_failed": "No se pudo escribir el registro de revisión de esta ejecución; la visualización se registrará en el registro de auditoría de la próxima ejecución:"
   }
 }

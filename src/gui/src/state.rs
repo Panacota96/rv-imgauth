@@ -130,6 +130,8 @@ pub struct GuiState {
     pub lang: String,
     pub out_dir: String,
     pub actor: String,
+    /// Last failure to write the reviewed run's review log (the view was then noted for the next run).
+    pub review_error: Option<String>,
     pub case_id: String,
     pub phase: Phase,
     pub progress: Progress,
@@ -179,6 +181,7 @@ impl Default for GuiState {
             lang: "en".into(),
             out_dir: "rakvor-out".into(),
             actor: rv_imgauth_core::env::os_user(),
+            review_error: None,
             case_id: String::new(),
             phase: Phase::Idle,
             progress: Progress::default(),
@@ -856,9 +859,11 @@ impl GuiState {
     }
 
     /// Records `ui_map_viewed` once per (item, map, mode) shown; called after every viewer interaction.
-    /// Goes through the GUI audit hook ([`GuiState::note`]): the entry is written, with its time, to the
-    /// audit log of the next run started from this window (a closed run's log is never appended to: the case
-    /// check refuses entries after `run_finished`). `run_id` names the run whose map was viewed.
+    /// The entry goes to the reviewed run's own hash-chained review log (`review.jsonl` next to its
+    /// `audit.jsonl`, anchored to `run_finished`, checked by verify-log and verify-case), so a view is
+    /// recorded even if no other run is started. If that write fails, the entry falls back to the GUI audit
+    /// hook ([`GuiState::note`], written to the next run's audit log) and the error is kept in
+    /// `review_error` for the status line.
     pub fn audit_map_view(&mut self) -> bool {
         let Some((action, details)) = self.map_view_event() else {
             return false;
@@ -875,7 +880,24 @@ impl GuiState {
             return false;
         }
         self.viewer.last_viewed = Some(key);
-        self.note(action, details);
+        let actor = if self.actor.trim().is_empty() {
+            rv_imgauth_core::env::os_user()
+        } else {
+            self.actor.trim().to_string()
+        };
+        let written = match self.outcome.as_ref().map(|o| o.log_dir.clone()) {
+            Some(dir) => rv_imgauth_core::review::append(&dir, &actor, action, details.clone())
+                .map(|_| ())
+                .map_err(|e| format!("{}: {}", dir.display(), e)),
+            None => Err("no finished run in this window".to_string()),
+        };
+        match written {
+            Ok(()) => self.review_error = None,
+            Err(e) => {
+                self.review_error = Some(e);
+                self.note(action, details);
+            }
+        }
         true
     }
 
@@ -2840,14 +2862,26 @@ mod tests {
             .position(|r| r.name == "camera-original.jpg")
             .unwrap();
         s.open_viewer(row);
-        let (a, d) = s.ui_actions.last().unwrap();
-        assert_eq!(a, "ui_map_viewed");
+        // The view is written to the reviewed run's own review log (not deferred to a next run).
+        assert_eq!(s.review_error, None);
+        assert!(!s.ui_actions.iter().any(|(a, _)| a == "ui_map_viewed"));
+        let review = std::fs::read_to_string(summary.log_dir.join("review.jsonl")).unwrap();
+        let entry: Value = serde_json::from_str(review.lines().last().unwrap()).unwrap();
+        assert_eq!(entry["action"], "ui_map_viewed");
+        assert_eq!(entry["run_id"].as_str(), Some(summary.run_id.as_str()));
+        let d = &entry["details"];
         assert_eq!(
             (d["item"].as_str(), d["map"].as_str()),
             (Some("camera-original.jpg"), Some("maps/ela.png"))
         );
         assert_eq!(d["run_id"].as_str(), Some(summary.run_id.as_str()));
         assert_eq!(d["map_digest"]["algorithm"], "sha256");
+        // ... and the run's logs, review log included, still verify.
+        assert!(
+            rv_imgauth_core::review::verify(&summary.log_dir)
+                .unwrap()
+                .is_some()
+        );
         let f = s.viewer_findings();
         assert!(!f.is_empty() && f.windows(2).all(|w| w[0].severity >= w[1].severity));
         assert!(f.iter().any(|x| x.code == "ELA_MAP_WRITTEN"));

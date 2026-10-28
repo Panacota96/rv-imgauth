@@ -877,6 +877,12 @@ impl HashInvApp {
             }
         });
         ui.weak(tr("viewer_help"));
+        if let Some(e) = &self.state.review_error {
+            ui.colored_label(
+                egui::Color32::from_rgb(0xE0, 0x9A, 0x30),
+                format!("{} {}", tr("review_log_failed"), e),
+            );
+        }
 
         // Side panel: findings, structure tree, metadata table.
         let findings = self.state.viewer_findings();

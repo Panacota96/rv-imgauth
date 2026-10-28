@@ -646,6 +646,7 @@
     "col_offset": "Offset",
     "col_length": "Length",
     "pixel_at": "Pixel",
-    "metadata_empty": "The file carries no metadata tags."
+    "metadata_empty": "The file carries no metadata tags.",
+    "review_log_failed": "Could not write this run's review log; the view will be recorded in the next run's audit log instead:"
   }
 }

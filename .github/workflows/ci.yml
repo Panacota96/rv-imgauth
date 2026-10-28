@@ -81,7 +81,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Python helpers (independent verifiers + local test TSA/PKI for the trust tests + image oracles)
-        run: pip install blake3 jsonschema pyhanko pillow numpy PyWavelets
+        run: pip install blake3 jsonschema pyhanko pillow==12.3.0 numpy==2.5.3 PyWavelets==1.10.0
       - name: Unit and integration tests (includes docs/usage-cli.md drift check and trust tests)
         shell: bash
         env:
