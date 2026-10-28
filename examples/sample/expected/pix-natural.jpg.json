@@ -1,0 +1,15 @@
+{
+  "analysis_signals": [
+    "NOISE_INCONSISTENCY_MAP",
+    "QT_STANDARD_IJG"
+  ],
+  "file": "pix-natural.jpg",
+  "maps": [
+    "ghost-q60.png",
+    "ghost-q70.png",
+    "ghost-q80.png",
+    "ghost-q90.png",
+    "noise-sigma.png",
+    "noise.png"
+  ]
+}

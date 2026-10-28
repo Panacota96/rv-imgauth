@@ -1,0 +1,17 @@
+{
+  "analysis_signals": [
+    "COPY_MOVE_CANDIDATE",
+    "NOISE_INCONSISTENCY_MAP",
+    "QT_STANDARD_IJG"
+  ],
+  "file": "pix-copy-move.jpg",
+  "maps": [
+    "copymove.png",
+    "ghost-q60.png",
+    "ghost-q70.png",
+    "ghost-q80.png",
+    "ghost-q90.png",
+    "noise-sigma.png",
+    "noise.png"
+  ]
+}

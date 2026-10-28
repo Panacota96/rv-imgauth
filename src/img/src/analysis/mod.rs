@@ -9,7 +9,10 @@ pub mod noise;
 pub mod pixels;
 pub mod qt;
 pub mod reference;
+#[cfg(test)]
+pub(crate) mod testutil;
 pub mod thumbnail;
+mod util;
 
 /// Copy-move detection settings (defaults are the documented v1 values).
 #[derive(Clone, Debug, PartialEq)]
