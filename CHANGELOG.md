@@ -5,6 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.2.0](https://github.com/Panacota96/rv-imgauth/compare/v0.1.0...v0.2.0) (2026-10-28)
+
+
+### Features
+
+* **cli:** fingerprints learn records software, make/model and the quantization-table digest ([09e95fa](https://github.com/Panacota96/rv-imgauth/commit/09e95fa3447e02e5acb23bc4dff30093c624c55d))
+* **cli:** real image analysis end to end: report sections, original preview, review log, samples and oracles ([47dccc1](https://github.com/Panacota96/rv-imgauth/commit/47dccc1c92654ffb3c056d2c00b8d832af199f69))
+* **core:** image analysis glue against the frozen image-layer API ([26163fc](https://github.com/Panacota96/rv-imgauth/commit/26163fc0beb14bf54605e82c5b8fb1d617f66cbf))
+* **gui:** image viewer (side by side / blended, scaled maps, structure and metadata) and full analysis options ([64fdd0f](https://github.com/Panacota96/rv-imgauth/commit/64fdd0f8600ebf664952e3084d8693cd83138ac6))
+* **gui:** map views go to the reviewed run's review log; pin oracle Python packages ([87289fd](https://github.com/Panacota96/rv-imgauth/commit/87289fd5c6909b69b2800c374827dd44fc2c0539))
+* **img:** FILE_STRUCTURE_DAMAGED; one expected file per sample shared by the parser and analysis tests ([902feb2](https://github.com/Panacota96/rv-imgauth/commit/902feb253d6531ec6a4b5eaabed1e7de6557761d))
+* **img:** freeze the image model, the image-layer API and the finding catalogue ([3c3acca](https://github.com/Panacota96/rv-imgauth/commit/3c3accaf5b192dc2312536c5390fb6cc7ebe812a))
+* **img:** JPEG/PNG/WebP/HEIF parsers, metadata readers, baseline coefficient decoder and signals ([6a96345](https://github.com/Panacota96/rv-imgauth/commit/6a9634572d713d9fa0c84a93ef0144ee5d13386b))
+* **img:** pixel decoding and the image analyses ([abccc1d](https://github.com/Panacota96/rv-imgauth/commit/abccc1d63bd990fe2b2d6d448b5e54c81a5f1c21))
+
+
+### Bug Fixes
+
+* PIXELS_NOT_DECODED finding; --max-pixels bounded by the 120 MP hard cap; MPF-only trailers are info; cargo-deny ([74a1410](https://github.com/Panacota96/rv-imgauth/commit/74a14109c218346004cb165f27fceabba87d11b0))
+
 ## [Unreleased]
 
 First release line of the image analyses (0.x). No version has been tagged yet: `version.txt` and
