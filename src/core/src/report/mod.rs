@@ -31,7 +31,7 @@ pub const LIMITATIONS: [&str; 9] = [
     "NO_VALIDATED_ERROR_RATES_YET",
     "TIMESTAMPS_FROM_FILESYSTEM",
     "TIMESTAMP_PROVES_EXISTENCE_ONLY",
-    "IMAGE_ANALYSES_PLANNED",
+    "SIGNATURE_TABLE_LIMITED",
 ];
 /// Limitations of one item: the run-level list plus the item's own (`details.limitation`, set by an analysis
 /// that could not run in full for this item).
@@ -821,14 +821,106 @@ fn table(header: Vec<String>, widths: &[f32], rows: &[Value], keys: &[&str]) -> 
     }
 }
 
-/// Image analysis status, fingerprint databases and maps, then every file the analysis wrote.
-fn image_blocks(ctx: &Value) -> Vec<Block> {
+/// Long side, in pixels, of the map copies embedded in the PDF reports.
+const PRINT_SIDE: u32 = 480;
+
+fn kv_rows(v: &Value) -> Vec<(String, String)> {
+    v.as_array()
+        .map(|a| a.iter().map(|r| (s(r, "k"), s(r, "v"))).collect())
+        .unwrap_or_default()
+}
+
+/// Image analysis sections (same order and content as technical.html), then every file the analysis wrote.
+/// `dir` is the item folder: the preview and the maps are embedded from it.
+fn image_blocks(ctx: &Value, dir: Option<&Path>) -> Vec<Block> {
     let t = |k: &str| s(ctx, &format!("t.{}", k));
     let mut b = Vec::new();
     let iv = &ctx["image"];
+    // Print copies (long side at most PRINT_SIDE pixels) keep the PDFs small; the caption names the
+    // full-resolution file, which is the one hashed and audited.
+    let embed = |href: &str| {
+        dir.and_then(|d| std::fs::read(d.join(href)).ok())
+            .and_then(|png| rv_imgauth_img::analysis::pixels::print_copy(&png, PRINT_SIDE).ok())
+    };
     if iv.is_object() {
         b.push(Block::Heading(t("image_analysis")));
-        b.push(Block::Kv(vec![(t("status"), s(iv, "status_label"))]));
+        let mut rows = vec![(t("status"), s(iv, "status_label"))];
+        rows.extend(kv_rows(&iv["facts"]));
+        b.push(Block::Kv(rows));
+        if iv["preview"].is_object() {
+            b.push(Block::Heading(t("image_preview")));
+            b.push(Block::Para(t("image_preview_text")));
+            let href = s(iv, "preview.href");
+            b.push(Block::Image {
+                png: embed(&href).unwrap_or_default(),
+                caption: format!(
+                    "{href} ({}) \u{2014} {}",
+                    s(iv, "preview.size"),
+                    t("print_copy")
+                ),
+                fallback: t("not_embedded"),
+                max_h: 300.0,
+            });
+        }
+        if iv["metadata"].is_object() {
+            let m = &iv["metadata"];
+            b.push(Block::Heading(t("metadata_summary")));
+            b.push(Block::Para(t("metadata_summary_text")));
+            b.push(Block::Kv(kv_rows(&m["stats"])));
+            if arr(m, "fields").is_empty() {
+                b.push(Block::Para(t("md_none")));
+            } else {
+                b.push(table(
+                    vec![t("md_group"), t("md_field"), t("md_value")],
+                    &[10.0, 18.0, 40.0],
+                    arr(m, "fields"),
+                    &["group", "name", "value"],
+                ));
+            }
+            if !arr(m, "history").is_empty() {
+                b.push(Block::Heading(t("xmp_history")));
+                b.push(table(
+                    vec![t("xh_action"), t("xh_when"), t("xh_agent"), t("xh_changed")],
+                    &[10.0, 16.0, 18.0, 14.0],
+                    arr(m, "history"),
+                    &["action", "when", "agent", "changed"],
+                ));
+            }
+            let problems = arr(m, "problems");
+            if !problems.is_empty() {
+                b.push(Block::Para(format!("{}:", t("md_problems"))));
+                for p in problems {
+                    b.push(Block::Bullet(p.as_str().unwrap_or_default().into()));
+                }
+            }
+        }
+        if iv["structure"].is_object() {
+            b.push(Block::Heading(t("structure_summary")));
+            b.push(Block::Para(t("structure_summary_text")));
+            b.push(Block::Kv(kv_rows(&iv["structure"]["stats"])));
+            b.push(Block::Para(format!("{}:", t("st_sequence"))));
+            b.push(Block::Mono(s(iv, "structure.sequence")));
+        }
+        if iv["qt"].is_object() {
+            b.push(Block::Heading(t("qt_title")));
+            b.push(Block::Para(t("qt_text")));
+            b.push(Block::Kv(kv_rows(&iv["qt"]["rows"])));
+            for q in arr(&iv["qt"], "tables") {
+                b.push(Block::Para(format!(
+                    "{} {} \u{00B7} {} \u{00B7} {}: {}",
+                    t("qt_table"),
+                    s(q, "id"),
+                    s(q, "precision"),
+                    t("qt_components"),
+                    s(q, "components")
+                )));
+                let rows: Vec<String> = arr(q, "rows")
+                    .iter()
+                    .map(|r| r.as_str().unwrap_or_default().to_string())
+                    .collect();
+                b.push(Block::Mono(rows.join("\n")));
+            }
+        }
         b.push(Block::Heading(t("fingerprint_dbs")));
         b.push(table(
             vec![
@@ -848,9 +940,56 @@ fn image_blocks(ctx: &Value) -> Vec<Block> {
         if maps.is_empty() {
             b.push(Block::Para(t("maps_none")));
         } else {
+            b.push(Block::Note(t("maps_text")));
             for m in maps {
-                b.push(Block::Bullet(s(m, "href")));
+                let href = s(m, "href");
+                b.push(Block::Para(s(m, "title")));
+                b.push(Block::Image {
+                    png: embed(&href).unwrap_or_default(),
+                    caption: format!("{href} \u{2014} {}", t("print_copy")),
+                    fallback: t("not_embedded"),
+                    max_h: 260.0,
+                });
+                let params = kv_rows(&m["params"]);
+                if !params.is_empty() {
+                    b.push(Block::Kv(params));
+                }
             }
+        }
+        let cm = &iv["copy_move"];
+        if cm.is_object() {
+            b.push(Block::Heading(t("copy_move")));
+            if arr(cm, "rows").is_empty() {
+                b.push(Block::Para(s(cm, "text")));
+            } else {
+                b.push(table(
+                    vec![t("cm_rank"), t("cm_shift")],
+                    &[10.0, 30.0],
+                    arr(cm, "rows"),
+                    &["rank", "shift"],
+                ));
+                b.push(Block::Kv(vec![(t("cm_blocks"), s(cm, "blocks"))]));
+            }
+        }
+        let r = &iv["reference"];
+        if r.is_object() {
+            b.push(Block::Heading(t("reference_comparison")));
+            b.push(Block::Status(s(r, "summary")));
+            b.push(Block::Para(t("reference_text")));
+            b.push(table(
+                vec![
+                    t("ref_property"),
+                    t("ref_result"),
+                    t("ref_item"),
+                    t("ref_reference"),
+                    t("ref_per_reference"),
+                ],
+                &[12.0, 16.0, 16.0, 16.0, 20.0],
+                arr(r, "rows"),
+                &["property", "result", "item", "reference", "each_text"],
+            ));
+            b.push(Block::Para(format!("{}:", t("ref_files"))));
+            b.push(Block::Kv(kv_rows(&r["files"])));
         }
     }
     let ex = arr(ctx, "extracted");
@@ -870,7 +1009,8 @@ fn image_blocks(ctx: &Value) -> Vec<Block> {
     b
 }
 
-pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
+/// `dir`: the item folder the maps are embedded from (None: captions only).
+pub fn technical_pdf(ctx: &Value, run: &RunInfo, dir: Option<&Path>) -> Result<Vec<u8>, String> {
     let t = |k: &str| s(ctx, &format!("t.{}", k));
     let mut b = header(
         ctx,
@@ -930,7 +1070,7 @@ pub fn technical_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
             ],
         });
     }
-    b.extend(image_blocks(ctx));
+    b.extend(image_blocks(ctx, dir));
     b.push(Block::Heading(t("method")));
     b.push(Block::Para(t("method_text")));
     b.push(Block::Heading(t("audit")));
@@ -972,6 +1112,13 @@ pub fn summary_pdf(ctx: &Value, run: &RunInfo) -> Result<Vec<u8>, String> {
     b.push(Block::Para(s(ctx, "item.summary_text")));
     b.push(Block::Heading(t("what_we_did")));
     b.push(Block::Para(t("method_text")));
+    if ctx["image"]["completed"] == true {
+        b.push(Block::Heading(t("plain_checks")));
+        b.push(Block::Kv(kv_rows(&ctx["image"]["plain"])));
+        for l in arr(&ctx["image"], "plain_lines") {
+            b.push(Block::Para(l.as_str().unwrap_or_default().into()));
+        }
+    }
     b.push(Block::Heading(t("what_we_found")));
     let f = arr(ctx, "findings");
     if f.is_empty() {
@@ -1238,7 +1385,7 @@ pub fn write_item_reports(
         put(write_hashed(
             dir,
             &format!("technical.{}.pdf", lang),
-            &technical_pdf(&ctx, run)?,
+            &technical_pdf(&ctx, run, Some(dir))?,
             algos,
         ))?;
         put(write_hashed(

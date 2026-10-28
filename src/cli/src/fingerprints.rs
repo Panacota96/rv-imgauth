@@ -5,8 +5,8 @@
 //! Nothing is sent anywhere. Every change is appended to `fingerprints.audit.jsonl` next to the DB
 //! (hash-chained, with the DB digest before and after), and the digests are printed.
 //!
-//! TODO(img): `learn_one` takes the JPEG quantization tables and EXIF Software / Make / Model once
-//! `rv_imgauth_img` parses them; until then learning fails and the database is left unchanged.
+//! `learn_one` takes the JPEG quantization-table SHA-256 and chroma subsampling, EXIF Software / XMP
+//! CreatorTool and EXIF Make / Model of each file.
 
 use rv_imgauth_core::fingerprints::{FingerprintDb, FingerprintEntry, starter_db};
 use rv_imgauth_core::hash::{HashAlgo, hash_bytes};

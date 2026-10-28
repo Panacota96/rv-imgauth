@@ -35,5 +35,10 @@ table.dense { font-size: 12px; } table.dense th, table.dense td { padding: 4px 6
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 10px 0; }
 .thumbs a { display: block; border: 1px solid var(--line); border-radius: 8px; padding: 6px; text-decoration: none; color: var(--ink); }
 .thumbs img { display: block; width: 100%; height: auto; border-radius: 4px; background: var(--soft); }
+.map { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 12px 0; }
+.map img { display: block; max-width: 100%; height: auto; border-radius: 4px; background: var(--soft); }
+.map h3 { margin: 0 0 8px; font-size: 14px; }
+pre.qt { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; margin: 4px 0 12px; }
+.seq { font-family: "Cascadia Mono", Consolas, ui-monospace, monospace; font-size: 12px; word-break: break-word; }
 @media (max-width: 640px) { .kv { grid-template-columns: 1fr; } .meta { text-align:left; } }
 @media print { main { padding: 0; } .band { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }

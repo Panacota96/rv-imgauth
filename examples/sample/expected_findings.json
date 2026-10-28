@@ -1,1 +1,124 @@
-{}
+{
+  "description": "Exact finding codes (sorted) per evidence file for `rv-imgauth analyze -i examples/sample/evidence -r` with the args below; checked by tests/run_samples.py. The reference images are analysed too (they are consistent with their own set).",
+  "args": [
+    "--maps",
+    "ela,noise,ghosts",
+    "--reference",
+    "examples/sample/evidence/reference/ref-1.jpg",
+    "--reference",
+    "examples/sample/evidence/reference/ref-2.jpg"
+  ],
+  "exit_code": 3,
+  "files": {
+    "bad-order.png": [
+      "DATA_AFTER_END_MARKER",
+      "PNG_CHUNK_ORDER_INVALID",
+      "PNG_PRIVATE_CHUNKS",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "camera-original.jpg": [
+      "ELA_MAP_WRITTEN",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_NON_STANDARD",
+      "QT_UNKNOWN",
+      "REFERENCE_CONSISTENT"
+    ],
+    "crash.jpg": [
+      "COEFFICIENTS_UNAVAILABLE",
+      "FILE_STRUCTURE_DAMAGED",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "edited-gimp.jpg": [
+      "ELA_MAP_WRITTEN",
+      "EXIF_SOFTWARE_EDITOR",
+      "METADATA_DATES_INCONSISTENT",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT",
+      "XMP_EDIT_HISTORY"
+    ],
+    "iphone-like.heic": [
+      "HEIC_PIXELS_NOT_DECODED",
+      "HEIF_STRUCTURE_ANOMALY",
+      "HEIF_UNREFERENCED_DATA",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "no-metadata.jpg": [
+      "ELA_MAP_WRITTEN",
+      "METADATA_STRIPPED",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "photo.webp": [
+      "REFERENCE_INCONSISTENT",
+      "WEBP_FLAGS_MISMATCH"
+    ],
+    "pix-copy-move.jpg": [
+      "COPY_MOVE_CANDIDATE",
+      "ELA_MAP_WRITTEN",
+      "METADATA_STRIPPED",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "pix-natural.jpg": [
+      "ELA_MAP_WRITTEN",
+      "METADATA_STRIPPED",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "pix-spliced-ghost.jpg": [
+      "ELA_MAP_WRITTEN",
+      "JPEG_GHOST_REGION",
+      "METADATA_STRIPPED",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "pix-whatsapp-like.jpg": [
+      "ELA_MAP_WRITTEN",
+      "METADATA_STRIPPED",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "progressive.jpg": [
+      "COEFFICIENTS_UNAVAILABLE",
+      "ELA_MAP_WRITTEN",
+      "METADATA_STRIPPED",
+      "NOISE_INCONSISTENCY_MAP",
+      "PROGRESSIVE_ENCODING",
+      "QT_STANDARD_IJG",
+      "QT_UNKNOWN",
+      "REFERENCE_INCONSISTENT"
+    ],
+    "reference/ref-1.jpg": [
+      "ELA_MAP_WRITTEN",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_NON_STANDARD",
+      "QT_UNKNOWN",
+      "REFERENCE_CONSISTENT"
+    ],
+    "reference/ref-2.jpg": [
+      "ELA_MAP_WRITTEN",
+      "NOISE_INCONSISTENCY_MAP",
+      "QT_NON_STANDARD",
+      "QT_UNKNOWN",
+      "REFERENCE_CONSISTENT"
+    ],
+    "screenshot.png": [
+      "ELA_NOT_APPLICABLE",
+      "METADATA_DATES_INCONSISTENT",
+      "NOISE_INCONSISTENCY_MAP",
+      "REFERENCE_INCONSISTENT"
+    ]
+  }
+}

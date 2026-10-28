@@ -275,7 +275,7 @@
       }
     },
     "image": {
-      "description": "Image analysis (null when the item is not an image). Sections per analysis are added as the analyses are implemented.",
+      "description": "Image analysis (null when the item is not an image): status, options, fingerprint databases, maps and the report summaries written by the analysis.",
       "type": [
         "object",
         "null"
@@ -287,8 +287,12 @@
       ],
       "properties": {
         "analysis": {
-          "description": "not_implemented (this build), completed or not_completed (worker failure, unreadable file).",
-          "type": "string"
+          "description": "completed, not_completed (worker failure, unreadable or unparseable file) or not_an_image (image name, no image signature).",
+          "enum": [
+            "completed",
+            "not_completed",
+            "not_an_image"
+          ]
         },
         "parser": {
           "type": [
@@ -336,7 +340,88 @@
           "type": "array",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Analysis maps under maps/ (the original preview is listed under original_preview, not here)."
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "original_preview": {
+          "description": "maps/original.png: lossless RGB8 preview of the decoded pixels (file, width, height, params); null for HEIC or undecodable files.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "map_parameters": {
+          "description": "The parameters recorded with each map ({file, params}).",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "metadata_summary": {
+          "description": "Key metadata fields, tag counts per group, GPS/MakerNote/ICC/XMP presence, xmpMM:History events, reading problems.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "structure_summary": {
+          "description": "Top-level segment sequence and per-format facts.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "qt_fingerprint": {
+          "description": "JPEG quantization tables (natural order), IJG quality or nearest + distance, table hash and database matches.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "reference_table": {
+          "description": "Comparison with --reference images: n and one row per property (consistent, inconsistent, varies, not_applicable).",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "references": {
+          "description": "Reference images used (path, SHA-256, status).",
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "pixel_decode_error": {
+          "description": "Why the pixels could not be decoded (no preview, map, copy-move or thumbnail comparison).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parser_error": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

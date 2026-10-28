@@ -1,8 +1,7 @@
 //! Runs the pixel/coefficient analyses on every synthetic `pix-*` sample of examples/sample/evidence and checks
 //! the result against examples/sample/expected/<file>.json and against the ground truth of each sample
-//! (tests/samples/make_pixels.py). Set RV_BLESS=1 to (re)write the expected files.
-
-mod common;
+//! (tests/samples/make_pixels.py). Set RV_BLESS=1 to (re)write the expected files. The samples go through the
+//! library's own parser and coefficient decoder (`parse`, `decode_coefficients`), as in a real run.
 
 use rv_imgauth_img::analysis::{CopyMoveOptions, copymove, double, ghosts, noise, qt};
 use rv_imgauth_img::{Format, JpegInfo, decode_coefficients, decode_pixels, parse};
@@ -19,11 +18,11 @@ struct Result {
 }
 
 fn analyse(bytes: &[u8]) -> Result {
-    let (mini_info, mini_coefs) = common::read(bytes);
-    let info: JpegInfo = parse(bytes).ok().and_then(|p| p.jpeg).unwrap_or(mini_info);
-    let coefs = decode_coefficients(bytes).unwrap_or(mini_coefs);
+    let parsed = parse(bytes).expect("the parser reads every pix- sample");
+    let info: JpegInfo = parsed.jpeg.expect("pix- samples are JPEG");
+    let coefs = decode_coefficients(bytes).expect("pix- samples are baseline JPEG");
     let px = decode_pixels(bytes, Format::Jpeg).unwrap();
-    // Sanity of the coefficient reader: mean luma from the DC terms matches the decoded pixels.
+    // Sanity of the coefficient decoder: mean luma from the DC terms matches the decoded pixels.
     let y = coefs
         .iter()
         .find(|c| c.component_id == info.components[0].id)

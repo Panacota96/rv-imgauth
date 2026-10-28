@@ -53,6 +53,49 @@ pub enum Block {
         widths: Vec<f32>,
         rows: Vec<Vec<String>>,
     },
+    /// A PNG (8-bit grey or RGB, not interlaced) embedded as an image XObject, its IDAT stream copied as is
+    /// (FlateDecode + PNG predictors), scaled to the content width and at most `max_h` points high, with a
+    /// caption under it. Any other PNG is replaced by the caption and `fallback`.
+    Image {
+        png: Vec<u8>,
+        caption: String,
+        fallback: String,
+        max_h: f32,
+    },
+}
+
+/// (width, height, colours, concatenated IDAT) of a PNG the PDF can embed without decoding it.
+fn png_for_pdf(png: &[u8]) -> Option<(u32, u32, u8, Vec<u8>)> {
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return None;
+    }
+    let mut p = 8;
+    let mut head = None;
+    let mut idat = Vec::new();
+    while p + 8 <= png.len() {
+        let len = u32::from_be_bytes(png[p..p + 4].try_into().ok()?) as usize;
+        let kind = &png[p + 4..p + 8];
+        let data = png.get(p + 8..p.checked_add(8 + len)?)?;
+        match kind {
+            b"IHDR" if data.len() == 13 => {
+                let w = u32::from_be_bytes(data[0..4].try_into().ok()?);
+                let h = u32::from_be_bytes(data[4..8].try_into().ok()?);
+                // bit depth 8; colour type 0 (grey) or 2 (RGB); deflate; adaptive filter; no interlace.
+                let colours = match (data[8], data[9], data[10], data[11], data[12]) {
+                    (8, 0, 0, 0, 0) => 1,
+                    (8, 2, 0, 0, 0) => 3,
+                    _ => return None,
+                };
+                head = Some((w, h, colours));
+            }
+            b"IDAT" => idat.extend_from_slice(data),
+            b"IEND" => break,
+            _ => {}
+        }
+        p += 12 + len;
+    }
+    let (w, h, c) = head?;
+    (w > 0 && h > 0 && !idat.is_empty()).then_some((w, h, c, idat))
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -199,6 +242,8 @@ struct Layout {
     pages: Vec<String>,
     cur: String,
     y: f32,
+    /// Image XObjects in order of use: (width, height, colours, IDAT); `/Im{n}` is the n-th (from 1).
+    images: Vec<(u32, u32, u8, Vec<u8>)>,
 }
 
 impl Layout {
@@ -207,6 +252,7 @@ impl Layout {
             pages: Vec::new(),
             cur: String::new(),
             y: TOP,
+            images: Vec::new(),
         }
     }
 
@@ -601,6 +647,42 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
                 }
                 l.y -= 6.0;
             }
+            Block::Image {
+                png,
+                caption,
+                fallback,
+                max_h,
+            } => match png_for_pdf(png) {
+                Some((w, h, colours, idat)) => {
+                    let scale = (CONTENT_W / w as f32).min(max_h / h as f32);
+                    let (dw, dh) = (w as f32 * scale, h as f32 * scale);
+                    l.ensure(dh + 24.0);
+                    l.y -= 6.0 + dh;
+                    l.images.push((w, h, colours, idat));
+                    let _ = writeln!(
+                        l.cur,
+                        "q {:.2} 0 0 {:.2} {:.2} {:.2} cm /Im{} Do Q",
+                        dw,
+                        dh,
+                        MARGIN,
+                        l.y,
+                        l.images.len()
+                    );
+                    l.lines(MARGIN, CONTENT_W, Font::Regular, 8.0, MUTED, caption);
+                    l.y -= 4.0;
+                }
+                None => {
+                    l.lines(
+                        MARGIN,
+                        CONTENT_W,
+                        Font::Regular,
+                        8.0,
+                        MUTED,
+                        &format!("{caption} {fallback}"),
+                    );
+                    l.y -= 4.0;
+                }
+            },
             Block::SignLines(labels) => {
                 l.ensure(60.0);
                 l.y -= 44.0;
@@ -636,10 +718,20 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
     l.pages.push(l.cur);
     let total = l.pages.len();
 
-    // Assemble objects: 1 catalog, 2 pages, 3-5 fonts, 6 info, then (page, content) pairs.
+    // Assemble objects: 1 catalog, 2 pages, 3-5 fonts, 6 info, then (page, content) pairs, the signature
+    // and its widget (when signing), then the images (binary streams last, after the signature placeholder).
     let mut objects: Vec<String> = Vec::new();
     let kids: Vec<String> = (0..total).map(|i| format!("{} 0 R", 7 + 2 * i)).collect();
     let (sig_obj, widget_obj) = (7 + 2 * total, 8 + 2 * total);
+    let first_image = 7 + 2 * total + if sign.is_some() { 2 } else { 0 };
+    let xobjects = if l.images.is_empty() {
+        String::new()
+    } else {
+        let refs: Vec<String> = (0..l.images.len())
+            .map(|i| format!("/Im{} {} 0 R", i + 1, first_image + i))
+            .collect();
+        format!(" /XObject << {} >>", refs.join(" "))
+    };
     if sign.is_some() {
         objects.push(format!(
             "<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [{} 0 R] /SigFlags 3 >> >>",
@@ -712,7 +804,7 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
         } else {
             String::new()
         };
-        objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents {} 0 R{} >>", PAGE_W, PAGE_H, 8 + 2 * i, annots));
+        objects.push(format!("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >>{} >> /Contents {} 0 R{} >>", PAGE_W, PAGE_H, xobjects, 8 + 2 * i, annots));
         objects.push(format!("<< /Length {} >>\nstream\n{}endstream", c.len(), c));
     }
 
@@ -728,11 +820,25 @@ pub fn render(blocks: &[Block], meta: &Meta, sign: Option<SignFn>) -> Result<Vec
             sig_obj
         ));
     }
+    let mut objects: Vec<Vec<u8>> = objects.into_iter().map(String::into_bytes).collect();
+    for (w, h, colours, idat) in &l.images {
+        let mut o = format!(
+            "<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /{} /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors {colours} /BitsPerComponent 8 /Columns {w} >> /Length {} >>\nstream\n",
+            if *colours == 1 { "DeviceGray" } else { "DeviceRGB" },
+            idat.len()
+        )
+        .into_bytes();
+        o.extend_from_slice(idat);
+        o.extend_from_slice(b"\nendstream");
+        objects.push(o);
+    }
     let mut out: Vec<u8> = b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n".to_vec();
     let mut offsets = Vec::with_capacity(objects.len());
     for (i, o) in objects.iter().enumerate() {
         offsets.push(out.len());
-        out.extend_from_slice(format!("{} 0 obj\n{}\nendobj\n", i + 1, o).as_bytes());
+        out.extend_from_slice(format!("{} 0 obj\n", i + 1).as_bytes());
+        out.extend_from_slice(o);
+        out.extend_from_slice(b"\nendobj\n");
     }
     let xref = out.len();
     let mut x = format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1);
@@ -852,6 +958,56 @@ mod tests {
         .to_uppercase();
         assert!(text.contains(&format!("<{}", expected)));
         assert!(pdf.ends_with(b"%%EOF\n"));
+    }
+
+    /// A PNG written like the analysis maps (png crate), embedded without decoding; a signed PDF keeps the
+    /// images after the signature placeholder.
+    #[test]
+    fn png_maps_are_embedded_as_image_xobjects() {
+        let mut png = Vec::new();
+        {
+            let mut e = ::png::Encoder::new(&mut png, 3, 2);
+            e.set_color(::png::ColorType::Rgb);
+            e.set_depth(::png::BitDepth::Eight);
+            let mut w = e.write_header().unwrap();
+            w.write_image_data(&[10u8; 18]).unwrap();
+        }
+        let (w, h, c, idat) = png_for_pdf(&png).unwrap();
+        assert_eq!((w, h, c), (3, 2, 3));
+        assert!(!idat.is_empty());
+        assert!(png_for_pdf(b"not a png").is_none());
+        let blocks = [
+            Block::Image {
+                png: png.clone(),
+                caption: "ela.png".into(),
+                fallback: "(not embedded)".into(),
+                max_h: 200.0,
+            },
+            Block::Image {
+                png: b"junk".to_vec(),
+                caption: "bad.png".into(),
+                fallback: "(not embedded)".into(),
+                max_h: 200.0,
+            },
+        ];
+        let sign = |data: &[u8]| -> Result<Vec<u8>, String> {
+            Ok(crate::hash::hash_bytes(data, crate::hash::HashAlgo::Sha256).into_bytes())
+        };
+        for signer in [None, Some(&sign as SignFn)] {
+            let pdf = render(&blocks, &test_meta(), signer).unwrap();
+            let text = String::from_utf8_lossy(&pdf);
+            assert_eq!(text.matches("/Subtype /Image").count(), 1);
+            assert!(text.contains("/Im1 Do") && text.contains("/XObject << /Im1 "));
+            assert!(text.contains("/Predictor 15 /Colors 3"));
+            assert!(text.contains("(bad.png \\(not embedded\\))"));
+            assert!(find(&pdf, &idat).is_some(), "IDAT copied as is");
+            if signer.is_some() {
+                assert!(
+                    find(&pdf, b"/Contents <").unwrap() < find(&pdf, b"/Subtype /Image").unwrap()
+                );
+            }
+            assert!(pdf.ends_with(b"%%EOF\n"));
+        }
     }
 
     #[test]

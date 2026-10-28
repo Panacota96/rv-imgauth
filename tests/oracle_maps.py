@@ -2,13 +2,15 @@
 """Independent numpy oracle for the noise maps of rv-imgauth-img.
 
 usage: python3 tests/oracle_maps.py <input image> <outdir written by `cargo run -p rv-imgauth-img --example maps`>
+       python3 tests/oracle_maps.py --reports <OUT>/reports/<RUN-ID>   (every item folder with noise maps)
 
 Recomputes, from the same RGB pixels, (1) the median residual map noise.png = min(255, 10*|Y - median3x3(Y)|)
 with replicated borders and (2) the Mahdian-Saic sigma map noise-sigma.png: one-level db8 DWT (PyWavelets,
 mode "periodization", or a numpy implementation of the same filter when PyWavelets is missing), HH1 sub-band,
 sigma = median(|HH1|)/0.6745 per 40x40 block, grey = min(255, round(25.5*sigma)). Both maps must agree within
 +-1 grey level. Pixels: a PNG input is decoded with Pillow; for a JPEG the example's lossless pixels.png is used,
-because JPEG decoders differ by rounding (the oracle checks the map computation, not the decoder). ELA is not
+because JPEG decoders differ by rounding (the oracle checks the map computation, not the decoder); in an item
+folder of a run that file is maps/original.png, the lossless preview of the decoded pixels. ELA is not
 compared (Pillow's JPEG encoder differs from jpeg-encoder).
 """
 import sys
@@ -72,9 +74,12 @@ def sigma_map(y):
     return out, how
 
 
-def main():
-    src, outdir = Path(sys.argv[1]), Path(sys.argv[2])
-    pix = src if src.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n" else outdir / "pixels.png"
+def check(src, outdir):
+    """True when noise.png and noise-sigma.png in `outdir` match the oracle within 1 grey level."""
+    if src.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n":
+        pix = src
+    else:
+        pix = outdir / "pixels.png" if (outdir / "pixels.png").is_file() else outdir / "original.png"
     rgb = np.asarray(Image.open(pix).convert("RGB"))
     y = luma(rgb)
     ok = True
@@ -87,6 +92,21 @@ def main():
         d = np.abs(got - ref.astype(np.int64))
         print(f"{name}: max |diff| {d.max()} grey levels, {np.count_nonzero(d)} pixels differ ({how}; pixels {pix.name})")
         ok &= d.max() <= 1
+    return ok
+
+
+def main():
+    if sys.argv[1:2] == ["--reports"]:
+        import json
+        items = sorted(p for p in (Path(sys.argv[2]) / "items").iterdir() if (p / "maps" / "noise.png").is_file())
+        ok = bool(items)
+        for item in items:
+            src = Path(json.loads((item / "technical.json").read_text(encoding="utf-8"))["item"]["path"])
+            print(f"== {item.name}")
+            ok &= check(src, item / "maps")
+        print(f"{len(items)} item(s): " + ("PASS" if ok else "FAIL"))
+        sys.exit(0 if ok else 1)
+    ok = check(Path(sys.argv[1]), Path(sys.argv[2]))
     print("PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 

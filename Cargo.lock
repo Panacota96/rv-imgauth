@@ -3505,6 +3505,7 @@ dependencies = [
  "md-5",
  "minijinja",
  "p12-keystore",
+ "png",
  "rsa",
  "rv-imgauth-img",
  "serde",

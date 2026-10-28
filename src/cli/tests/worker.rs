@@ -35,9 +35,22 @@ impl Run {
 }
 
 fn scan(fault: Option<&str>, extra_env: &[(&str, &str)]) -> Run {
+    scan_image(JPEG, fault, extra_env)
+}
+
+/// One synthetic camera JPEG of examples/sample/evidence (1200 x 900, EXIF, thumbnail).
+fn camera_sample() -> Vec<u8> {
+    std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/sample/evidence/camera-original.jpg"),
+    )
+    .unwrap()
+}
+
+fn scan_image(image: &[u8], fault: Option<&str>, extra_env: &[(&str, &str)]) -> Run {
     let ev = tempfile::tempdir().unwrap();
     let out = tempfile::tempdir().unwrap();
-    std::fs::write(ev.path().join("photo.jpg"), JPEG).unwrap();
+    std::fs::write(ev.path().join("photo.jpg"), image).unwrap();
     std::fs::write(
         ev.path().join("note.txt"),
         "plain text, analysed in process",
@@ -126,31 +139,63 @@ fn assert_parser_failed(r: &Run, reason: &str) {
 
 #[test]
 fn worker_success_is_audited() {
-    let r = scan(None, &[]);
+    let image = camera_sample();
+    let r = scan_image(&image, None, &[]);
     assert_eq!(r.code, 0, "{}", r.stderr);
     let img = r.analyzed("photo.jpg");
     let summary = &img["details"]["analysis"];
     assert_eq!(summary["worker"]["status"], "completed", "{img}");
     assert_eq!(summary["worker"]["protocol"], "rv-imgauth-worker/1");
-    assert_eq!(summary["image_analysis"], "not_implemented");
+    assert_eq!(summary["image_analysis"], "completed");
     assert!(summary["fingerprint_dbs"].is_array());
-    assert!(
-        img["details"]["findings"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|f| f["code"] == "ANALYSIS_NOT_IMPLEMENTED" && f["severity"] == "info")
-    );
+    assert_eq!(summary["evidence_rehash"]["match"], true);
+    let codes: Vec<&str> = img["details"]["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["code"].as_str().unwrap())
+        .collect();
+    // The real analyses ran in the worker: tables, ELA and noise maps (default options).
+    for c in [
+        "QT_NON_STANDARD",
+        "ELA_MAP_WRITTEN",
+        "NOISE_INCONSISTENCY_MAP",
+    ] {
+        assert!(codes.contains(&c), "{c} missing: {codes:?}");
+    }
     let started = r.actions("analysis_started");
     assert!(
         started
             .iter()
             .any(|e| e["details"]["isolation"] == "worker_process")
     );
-    // No map is written in this build; every output that is written is hashed (see the crash test).
-    for e in r.actions("output_written") {
-        assert_eq!(e["details"]["hashes"]["sha256"].as_str().unwrap().len(), 64);
-    }
+    // Every file the worker wrote is hashed and audited once, with its kind.
+    let written = r.actions("output_written");
+    let mut kinds: Vec<(String, String)> = written
+        .iter()
+        .map(|e| {
+            assert_eq!(e["details"]["hashes"]["sha256"].as_str().unwrap().len(), 64);
+            let f = e["details"]["file"].as_str().unwrap();
+            (
+                f.split_once("photo.jpg/").unwrap().1.to_string(),
+                e["details"]["kind"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    kinds.sort();
+    let want: Vec<(String, String)> = [
+        ("maps/ela.png", "map"),
+        ("maps/noise-sigma.png", "map"),
+        ("maps/noise.png", "map"),
+        ("maps/original.png", "original_preview"),
+        ("maps/thumbnail-diff.png", "map"),
+        ("metadata.json", "metadata"),
+        ("structure.json", "structure"),
+    ]
+    .iter()
+    .map(|(a, b)| (a.to_string(), b.to_string()))
+    .collect();
+    assert_eq!(kinds, want);
 }
 
 /// The worker's network isolation is recorded in the audit (`details.worker.network`): on Linux an own

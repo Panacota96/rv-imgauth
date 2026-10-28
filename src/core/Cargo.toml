@@ -45,3 +45,4 @@ windows-sys.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+png.workspace = true

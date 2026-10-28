@@ -69,7 +69,7 @@ pub struct Analysis {
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize, PartialEq)]
 pub struct OutputFile {
     pub rel_path: String,
-    /// e.g. ela_map, noise_map, copy_move_map (planned; written under `maps/`), partial_output, unlisted_output
+    /// structure, metadata, original_preview, map (written under `maps/`), partial_output, unlisted_output
     pub kind: String,
 }
 
@@ -90,15 +90,15 @@ pub enum Isolation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DomainOptions {
-    /// Analysis maps written per image under `<ITEM>/maps/` (planned): "ela", "noise".
+    /// Analysis maps written per image under `<ITEM>/maps/`: "ela", "noise", "ghosts".
     pub maps: Vec<String>,
-    /// Copy-move (cloned region) detection (planned).
+    /// Copy-move (cloned region) detection.
     pub copy_move: bool,
-    /// JPEG quality used to re-compress the image for error level analysis, 1–100 (planned).
+    /// JPEG quality used to re-compress the image for error level analysis, 1–100.
     pub ela_quality: u8,
     /// Images with more pixels than this are not decoded (decompression bombs).
     pub max_pixels: u64,
-    /// Reference images (known originals from the same device) to compare with (planned).
+    /// Reference images (known originals from the same device) to compare with.
     pub references: Vec<std::path::PathBuf>,
     pub worker_timeout_s: u64,
     pub worker_memory_mb: u64,

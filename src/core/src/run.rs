@@ -1062,7 +1062,7 @@ mod tests {
         std::fs::write(ev.path().join("a.txt"), "same").unwrap();
         std::fs::write(ev.path().join("b.txt"), "same").unwrap();
         std::fs::write(ev.path().join("photo.jpg"), b"%PDF-1.7\n...").unwrap();
-        // photo.jpg is examined as an image (planned analyses: ANALYSIS_NOT_IMPLEMENTED, info).
+        // photo.jpg is a PDF under an image name: examined as an image candidate, not_an_image.
         let mut events = Vec::new();
         let s = run(
             &cfg(ev.path().into(), out.path().into()),
