@@ -1,0 +1,12 @@
+{
+  "file": "progressive.jpg",
+  "format": "jpeg",
+  "width": 800,
+  "height": 600,
+  "signals": [
+    "METADATA_STRIPPED",
+    "PROGRESSIVE_ENCODING"
+  ],
+  "coefficients": "unsupported",
+  "thumbnail": false
+}
