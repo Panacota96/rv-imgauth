@@ -33,10 +33,26 @@ DESCRIPTION:
        bytes it reads and compares them with the first pass;
     3. turns what it saw into findings (signals with a severity, what they show and what they do
        not prove) and writes a technical review and a customer summary (HTML, PDF and JSON).
-  Planned in this build (not yet implemented; every image gets the info finding
-  ANALYSIS_NOT_IMPLEMENTED): structure and metadata checks, JPEG quantization-table
-  fingerprints, error level analysis (ELA) and noise maps, copy-move detection and comparison
-  with reference images from the same device. The options for them are accepted and audited.
+  IMAGE ANALYSES (each writes findings; files go to the item folder <ITEM>, see FILES WRITTEN):
+    - Structure: JPEG marker sequence, duplicate tables, progressive frames, data after EOI; PNG
+      chunk order, private chunks, data after IEND; WebP VP8X flags vs chunks; HEIF boxes, item
+      graph and bytes no box or item covers. Full tree with offsets in structure.json.
+    - Metadata: EXIF, XMP (CreatorTool, xmpMM:History), IPTC and PNG text; editor software,
+      inconsistent dates or sizes, stripped metadata, messenger traces, missing MakerNote. Every
+      tag in metadata.json.
+    - JPEG quantization tables: exact IJG quality q=N, or the nearest q and its distance (never a
+      quality percentage); the table hash is looked up in the fingerprint databases.
+    - Double JPEG compression: periodicity of the DCT coefficient histograms (baseline JPEG).
+    - Visual maps (--maps; no score, visual aids only): ELA (JPEG re-saved at --ela-quality,
+      fixed gain), noise (median 3x3 residual and a db8 sigma map per 40x40 block), JPEG ghosts
+      (re-saved at q 50-90; images up to 24 megapixels).
+    - Copy-move (--copy-move): 16x16 block DCT features on a grey copy at most 1024 px long, sorted
+      and voted by shift vector (shift of 32 px or more, 20 blocks or more).
+    - Embedded EXIF thumbnail compared with the main image (thumbnail-diff.png).
+    - Reference comparison (--reference): tables, markers, EXIF tag set, thumbnail, resolution,
+      ICC profile, subsampling, PNG chunks and HEIF items against known originals.
+    HEIC/HEIF pixels are not decoded (structure and metadata only: HEIC_PIXELS_NOT_DECODED).
+    Images above --max-pixels are not decoded (ANALYSIS_SKIPPED_SIZE_CAP).
   Each run also writes a statistics report and an audit trail under <OUT>/logs/<RUN-ID>/. Every
   action is appended to a hash-chained log that `rv-imgauth verify-log` can check later.
   The result is a set of signals for an examiner, never a verdict that an image is authentic or
@@ -56,6 +72,8 @@ EXAMPLES:
     rv-imgauth analyze -i D:\\evidence -r --hash sha256,md5 --lang es --case CASE-2026-014
   Review the files listed in a text file, reports in the three languages, machine-readable progress:
     rv-imgauth analyze --input-list files.txt --lang all --progress jsonl > events.jsonl
+  Every map, including JPEG ghosts:
+    rv-imgauth analyze -i evidence -r --maps ela,noise,ghosts
   Large batch: noise map only, no copy-move, reports only for flagged items:
     rv-imgauth analyze -i E:\\phone-export -r --maps noise --copy-move off --item-reports flagged
   Compare with known originals from the same camera:
@@ -92,8 +110,11 @@ FILES WRITTEN:
                                            maps, every file written for the item).
   <ITEM>/summary.json|.<LANG>.html|.pdf    Customer summary.
   <ITEM>/custody.json|.<es|fr|en>.html|.pdf  Chain-of-custody form.
-  <ITEM>/maps/*.png                        Analysis maps (ELA, noise, copy-move; planned in this
-                                           build).
+  <ITEM>/structure.json                    Marker, chunk or box tree with byte offsets.
+  <ITEM>/metadata.json                     Every metadata tag read (EXIF, XMP, IPTC, PNG text).
+  <ITEM>/maps/original.png                 Lossless preview of the decoded pixels (not for HEIC).
+  <ITEM>/maps/ela.png, noise.png, noise-sigma.png, ghost-qNN.png, copymove.png,
+              thumbnail-diff.png           Visual maps, each with its parameters in the report.
   Every file under <ITEM> is hashed with the selected algorithms and recorded in the audit log.
   With --case-dir <CASE>, logs/ and reports/ go to <CASE>/runs/rv-imgauth/<RUN-ID>/, and:
   <CASE>/case-log.jsonl                    Hash-chained case log of every tool: run_started and
@@ -134,8 +155,9 @@ FORENSIC NOTES:
 
 const FINGERPRINTS_AFTER_HELP: &str = "\
 DESCRIPTION:
-  Fingerprints recognise the camera, phone, app or editor that wrote an image (planned in this
-  build: JPEG quantization tables and software strings). Three databases are used by `analyze`:
+  Fingerprints recognise the camera, phone, app or editor that wrote an image from its JPEG
+  quantization tables (SHA-256 of the tables), chroma subsampling and software or camera strings.
+  Three databases are used by `analyze`:
   the bundled starter DB, the local DB learned on this workstation and, optionally,
   --fingerprints-db FILE. The local DB lives in
   %LOCALAPPDATA%\\Rakvor\\rv-imgauth\\fingerprints.local.json (Windows) or
@@ -152,8 +174,9 @@ DESCRIPTION:
   Reads each image read-only, takes what identifies the software or device that wrote it and adds
   one entry `local-<label>` to the local database. Several files: only what all files share is
   kept. Learning the same label again merges into the existing entry. Nothing is written if any
-  file fails. Planned in this build: image parsing is not implemented yet, so learning reports an
-  error and leaves the database unchanged.
+  file fails. Learned: the JPEG quantization-table SHA-256 and chroma subsampling, EXIF Software
+  or XMP CreatorTool, and EXIF Make/Model. A JPEG without quantization tables, or a file with
+  none of these, cannot be learned from.
 
 FILES WRITTEN:
   <LOCAL-DB-FOLDER>/fingerprints.local.json    The local database (version incremented).
@@ -208,11 +231,17 @@ TIMESTAMP CHECKS:
   validated\"; with it the TSA certificate must chain to a certificate of the bundle (signatures,
   validity at the token's time, CA flag). Revocation is not checked.
 
+REVIEW LOG:
+  review.jsonl in the same folder (viewing after the run, e.g. maps opened in the GUI viewer) is
+  checked when present: an intact hash chain whose first entry links to the run's run_finished
+  entry, every entry naming this run. The output adds \"review entries: N\".
+
 EXIT CODES:
   0  The chain is intact and every timestamp token verifies.
   1  The log or the --tsa-ca file cannot be read.
-  3  The chain is broken (an entry was edited, deleted or re-ordered), or a timestamp token does not
-     verify (altered token, invalid TSA signature, chain not trusted by --tsa-ca).")]
+  3  The chain is broken (an entry was edited, deleted or re-ordered), a timestamp token does not
+     verify (altered token, invalid TSA signature, chain not trusted by --tsa-ca), or review.jsonl
+     is broken or anchored to another run.")]
     VerifyLog {
         /// Path to audit.jsonl, or to the run's log folder that contains it.
         ///
@@ -267,7 +296,9 @@ CHECKS:
   - evidence/registry.json has the SHA-256 recorded at the last registry change;
   - every run announced in the case log (by any Rakvor tool) has an intact audit.jsonl (and
     valid timestamp tokens), its case_linked entry points to its run_started entry, and the
-    audit head recorded at run_finished is its final entry (only timestamp_obtained may follow).
+    audit head recorded at run_finished is its final entry (only timestamp_obtained may follow);
+  - a run's review.jsonl (viewing after the run), when present, is an intact chain anchored to
+    that run's run_finished entry (\"review entries: N\").
 
 EXAMPLES:
   rv-imgauth verify-case E:\\CASE-014
@@ -436,24 +467,27 @@ struct AnalyzeArgs {
     )]
     sign_pass_env: String,
 
-    /// Analysis maps written per image under <ITEM>/maps/: ela, noise (comma-separated or
-    /// repeated), or none. Planned in this build: accepted and audited, no map is written yet.
+    /// Analysis maps written per image under <ITEM>/maps/ (comma-separated or repeated), or none:
+    /// ela (error level, JPEG only: ela.png), noise (noise.png and noise-sigma.png) and ghosts
+    /// (JPEG ghosts at q 50, 60, 70, 80, 90: ghost-qNN.png; JPEG up to 24 megapixels). The
+    /// preview maps/original.png and the thumbnail difference are written whatever is selected.
     /// Default: ela,noise
-    /// Example: --maps noise   or   --maps none
+    /// Example: --maps ela,noise,ghosts   or   --maps none
     #[arg(
         long,
         value_name = "LIST",
         value_delimiter = ',',
         default_value = "ela,noise",
-        value_parser = ["ela", "noise", "none"],
+        value_parser = ["ela", "noise", "ghosts", "none"],
         verbatim_doc_comment,
         hide_default_value = true,
         hide_possible_values = true
     )]
     maps: Vec<String>,
 
-    /// Look for regions copied and pasted within the same image (copy-move): on or off.
-    /// Planned in this build.
+    /// Look for regions copied and pasted within the same image (copy-move): on or off. Writes
+    /// maps/copymove.png and the shift vectors when a candidate is found. Scaled or rotated copies
+    /// are not detected.
     /// Default: on
     /// Example: --copy-move off
     #[arg(
@@ -467,22 +501,24 @@ struct AnalyzeArgs {
     )]
     copy_move: OnOff,
 
-    /// JPEG quality used to re-compress each image for error level analysis, 1 to 100.
-    /// Planned in this build.
+    /// JPEG quality used to re-compress each image for error level analysis, 1 to 100
+    /// (jpeg-encoder, IJG tables, 4:4:4, fixed gain 15).
     /// Default: 95
     /// Example: --ela-quality 90
     #[arg(long, value_name = "Q", default_value_t = 95, value_parser = clap::value_parser!(u8).range(1..=100), verbatim_doc_comment, hide_default_value = true)]
     ela_quality: u8,
 
     /// Images with more pixels than this are not decoded (protection against decompression
-    /// bombs), 1000000 to 2000000000.
+    /// bombs), 1000000 to 2000000000: no preview, map, copy-move or thumbnail comparison
+    /// (ANALYSIS_SKIPPED_SIZE_CAP); structure, metadata and tables are still examined.
     /// Default: 100000000 (100 megapixels)
     /// Example: --max-pixels 250000000
     #[arg(long, value_name = "N", default_value_t = 100_000_000, value_parser = clap::value_parser!(u64).range(1_000_000..=2_000_000_000), verbatim_doc_comment, hide_default_value = true)]
     max_pixels: u64,
 
-    /// Reference image (a known original from the same device) to compare with. Repeat for
-    /// several. Read-only; its SHA-256 is recorded. Planned in this build.
+    /// Reference image (a known original from the claimed device) to compare every item with.
+    /// Repeat for several. Read-only; its SHA-256 is recorded. Each property is compared only when
+    /// all references agree on it (REFERENCE_CONSISTENT / REFERENCE_INCONSISTENT).
     /// Default: none
     /// Example: --reference ref/IMG_0040.jpg --reference ref/IMG_0041.jpg
     #[arg(long = "reference", value_name = "FILE", verbatim_doc_comment)]
@@ -1079,13 +1115,20 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
     };
     let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let mut tokens = Vec::new();
+    let mut review = None;
     let checked = audit::verify(&path).and_then(|n| {
         let v = trust::verify_timestamps_with(&dir, &audit::heads(&path), anchors.as_deref());
         tokens = v.tokens;
-        if v.problems.is_empty() {
+        let mut problems = v.problems;
+        // The review log (viewing after the run) is checked when present: chain and anchor to this run.
+        match rv_imgauth_core::review::verify(&dir) {
+            Ok(r) => review = r,
+            Err(p) => problems.extend(p.into_iter().map(|x| format!("review.jsonl: {x}"))),
+        }
+        if problems.is_empty() {
             Ok(n)
         } else {
-            Err(v.problems)
+            Err(problems)
         }
     });
     match checked {
@@ -1093,6 +1136,9 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             println!("OK  {} entries, chain intact: {}", n, path.display());
             for t in tokens {
                 println!("    {}", t);
+            }
+            if let Some(r) = review {
+                println!("    review entries: {r} (review.jsonl, anchored to run_finished)");
             }
             EXIT_OK
         }
@@ -1129,6 +1175,9 @@ fn verify_case(dir: PathBuf) -> u8 {
             v.runs,
             dir.display()
         );
+        if v.review_entries > 0 {
+            println!("    review entries: {}", v.review_entries);
+        }
         for w in &v.warnings {
             println!("  warning: {}", w);
         }

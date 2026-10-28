@@ -16,5 +16,12 @@
   ],
   "planned_command": "analyze",
   "case_role": "analysis",
-  "sample_args": []
+  "sample_args": [
+    "--maps",
+    "ela,noise,ghosts",
+    "--reference",
+    "examples/sample/evidence/reference/ref-1.jpg",
+    "--reference",
+    "examples/sample/evidence/reference/ref-2.jpg"
+  ]
 }

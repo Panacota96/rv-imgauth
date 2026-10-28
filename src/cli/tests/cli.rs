@@ -621,6 +621,44 @@ fn case_folder_analysis_verify_case_and_tampering() {
         .stdout(predicate::str::contains(
             "2 registered items, 2 runs verified",
         ));
+    // Viewing after the run goes to the run's review log; verify-case checks it and counts it, and a review
+    // log copied from another run (wrong anchor) breaks the case.
+    let logs = run_dir.join("logs");
+    rv_imgauth_core::review::append(
+        &logs,
+        "Ana",
+        "ui_map_viewed",
+        serde_json::json!({"item": "a.jpg", "map": "maps/ela.png", "opacity": 0.5}),
+    )
+    .unwrap();
+    bin()
+        .arg("verify-case")
+        .arg(&case)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("review entries: 1"));
+    bin()
+        .arg("verify-log")
+        .arg(&logs)
+        .assert()
+        .code(0)
+        .stdout(predicate::str::contains("review entries: 1"));
+    let review = logs.join(rv_imgauth_core::review::REVIEW_FILE);
+    let good = std::fs::read_to_string(&review).unwrap();
+    std::fs::write(&review, good.replace("maps/ela.png", "maps/noise.png")).unwrap();
+    bin()
+        .arg("verify-case")
+        .arg(&case)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("review.jsonl"));
+    bin()
+        .arg("verify-log")
+        .arg(&logs)
+        .assert()
+        .code(3)
+        .stdout(predicate::str::contains("review.jsonl"));
+    std::fs::write(&review, &good).unwrap();
     // The case id may be left out once the case exists; no input = every registered item.
     case_analyze(&case)
         .assert()

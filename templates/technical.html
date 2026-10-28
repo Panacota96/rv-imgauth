@@ -42,7 +42,38 @@
 <h2>{{ t.image_analysis }}</h2>
 <div class="kv">
   <div>{{ t.status }}</div><div>{{ image.status_label }}</div>
+  {% for r in image.facts %}<div>{{ r.k }}</div><div>{{ r.v }}</div>{% endfor %}
 </div>
+
+{% if image.preview %}<h2>{{ t.image_preview }}</h2>
+<p>{{ t.image_preview_text }}</p>
+<div class="map"><a href="{{ image.preview.href }}"><img src="{{ image.preview.href }}" alt="{{ t.image_preview }}" loading="lazy"></a>
+<div class="mono">{{ image.preview.href }} ({{ image.preview.size }})</div></div>{% endif %}
+
+{% if image.metadata %}<h2>{{ t.metadata_summary }}</h2>
+<p>{{ t.metadata_summary_text }}</p>
+<div class="kv">{% for r in image.metadata.stats %}<div>{{ r.k }}</div><div{% if r.v|length > 40 %} class="mono"{% endif %}>{{ r.v }}</div>{% endfor %}</div>
+{% if image.metadata.fields %}<div class="scroll"><table class="dense"><tr><th>{{ t.md_group }}</th><th>{{ t.md_field }}</th><th>{{ t.md_value }}</th></tr>
+{% for f in image.metadata.fields %}<tr><td>{{ f.group }}</td><td class="mono">{{ f.name }}</td><td>{{ f.value }}</td></tr>{% endfor %}
+</table></div>{% else %}<p>{{ t.md_none }}</p>{% endif %}
+{% if image.metadata.history %}<h3>{{ t.xmp_history }}</h3>
+<div class="scroll"><table class="dense"><tr><th>{{ t.xh_action }}</th><th>{{ t.xh_when }}</th><th>{{ t.xh_agent }}</th><th>{{ t.xh_changed }}</th></tr>
+{% for h in image.metadata.history %}<tr><td>{{ h.action }}</td><td>{{ h.when }}</td><td>{{ h.agent }}</td><td>{{ h.changed }}</td></tr>{% endfor %}
+</table></div>{% endif %}
+{% if image.metadata.problems %}<p>{{ t.md_problems }}:</p><ul>{% for p in image.metadata.problems %}<li>{{ p }}</li>{% endfor %}</ul>{% endif %}
+{% endif %}
+
+{% if image.structure %}<h2>{{ t.structure_summary }}</h2>
+<p>{{ t.structure_summary_text }}</p>
+<div class="kv">{% for r in image.structure.stats %}<div>{{ r.k }}</div><div>{{ r.v }}</div>{% endfor %}
+  <div>{{ t.st_sequence }}</div><div class="seq">{{ image.structure.sequence }}</div></div>{% endif %}
+
+{% if image.qt %}<h2>{{ t.qt_title }}</h2>
+<p>{{ t.qt_text }}</p>
+<div class="kv">{% for r in image.qt.rows %}<div>{{ r.k }}</div><div{% if r.v|length > 40 and " " not in r.v %} class="mono"{% endif %}>{{ r.v }}</div>{% endfor %}</div>
+{% for q in image.qt.tables %}<h3>{{ t.qt_table }} {{ q.id }} · {{ q.precision }} · {{ t.qt_components }}: {{ q.components }}</h3>
+<pre class="qt">{% for r in q.rows %}{{ r }}
+{% endfor %}</pre>{% endfor %}{% endif %}
 
 <h2>{{ t.fingerprint_dbs }}</h2>
 <div class="scroll"><table class="dense"><tr><th>{{ t.fp_role }}</th><th>{{ t.fp_db }}</th><th>{{ t.fp_version }}</th><th>{{ t.fp_entries }}</th><th>{{ t.fp_status }}</th><th>SHA-256</th></tr>
@@ -50,8 +81,28 @@
 </table></div>
 
 <h2>{{ t.analysis_maps }}</h2>
-{% if image.maps %}<div class="thumbs">{% for i in image.maps %}<a href="{{ i.href }}"><img src="{{ i.href }}" alt="{{ i.name }}" loading="lazy"><span class="mono">{{ i.name }}</span></a>{% endfor %}</div>
+{% if image.maps %}<p class="note">{{ t.maps_text }}</p>
+{% for i in image.maps %}<div class="map"><h3>{{ i.title }}</h3>
+<a href="{{ i.href }}"><img src="{{ i.href }}" alt="{{ i.name }}" loading="lazy"></a>
+<div class="mono">{{ i.href }}</div>
+{% if i.params %}<div class="kv">{% for p in i.params %}<div>{{ p.k }}</div><div>{{ p.v }}</div>{% endfor %}</div>{% endif %}
+</div>{% endfor %}
 {% else %}<p>{{ t.maps_none }}</p>{% endif %}
+
+<h2>{{ t.copy_move }}</h2>
+{% if image.copy_move.rows %}<table class="dense"><tr><th>{{ t.cm_rank }}</th><th>{{ t.cm_shift }}</th></tr>
+{% for r in image.copy_move.rows %}<tr><td>{{ r.rank }}</td><td class="mono">{{ r.shift }}</td></tr>{% endfor %}
+</table>
+<div class="kv"><div>{{ t.cm_blocks }}</div><div>{{ image.copy_move.blocks }}</div></div>
+{% else %}<p>{{ image.copy_move.text }}</p>{% endif %}
+
+{% if image.reference %}<h2>{{ t.reference_comparison }}</h2>
+<p class="status">{{ image.reference.summary }}</p>
+<p>{{ t.reference_text }}</p>
+<div class="scroll"><table class="dense"><tr><th>{{ t.ref_property }}</th><th>{{ t.ref_result }}</th><th>{{ t.ref_item }}</th><th>{{ t.ref_reference }}</th><th>{{ t.ref_per_reference }}</th></tr>
+{% for r in image.reference.rows %}<tr class="ref-{{ r.status }}"><td>{{ r.property }}</td><td>{{ r.result }}</td><td class="mono">{{ r.item }}</td><td class="mono">{{ r.reference }}</td><td class="mono">{% for l in r.each %}<div>{{ l }}</div>{% endfor %}</td></tr>{% endfor %}
+</table></div>
+<div class="kv">{% for f in image.reference.files %}<div>{{ f.k }}</div><div class="mono">{{ f.v }}</div>{% endfor %}</div>{% endif %}
 {% endif %}
 
 {% if extracted %}<h2>{{ t.extracted_files }}</h2>

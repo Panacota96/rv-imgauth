@@ -80,8 +80,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python helpers (independent verifiers + local test TSA/PKI for the trust tests)
-        run: pip install blake3 jsonschema pyhanko
+      - name: Python helpers (independent verifiers + local test TSA/PKI for the trust tests + image oracles)
+        run: pip install blake3 jsonschema pyhanko pillow numpy PyWavelets
       - name: Unit and integration tests (includes docs/usage-cli.md drift check and trust tests)
         shell: bash
         env:
@@ -98,22 +98,39 @@ jobs:
       - name: Sample run
         shell: bash
         run: |
-          # The sample set has no high-severity finding (a renamed file is medium): exit code 0 is expected.
+          # The whole sample folder against the two reference images, with every map. pix-copy-move.jpg has a
+          # high-severity finding (COPY_MOVE_CANDIDATE): exit code 3 is expected; crash.jpg must not stop the run.
+          ev=examples/sample/evidence
           rc=0
-          cargo run --locked -q -p rv-imgauth-cli -- analyze -i examples/sample/evidence --hash sha256,blake3 --lang all --out ci-out --progress none --no-timestamp || rc=$?
-          test "$rc" -eq 0
+          cargo run --locked -q -p rv-imgauth-cli -- analyze -i $ev -r --maps ela,noise,ghosts --reference $ev/reference/ref-1.jpg --reference $ev/reference/ref-2.jpg --hash sha256,blake3 --lang all --out ci-out --progress none --no-timestamp || rc=$?
+          test "$rc" -eq 3
       - name: Cross-language verification (Python re-checks the chain, hashes and JSON schemas)
         shell: bash
         run: |
           run=$(find ci-out/logs -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tail -n 1)
           python tests/verify_chain.py "ci-out/logs/$run"
           python tests/validate_reports.py "ci-out/reports/$run"
+      - name: Sample findings, evidence digests, verify-log and reproducibility (tests/run_samples.py)
+        shell: bash
+        run: |
+          bin=target/debug/rv-imgauth
+          if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+          python tests/run_samples.py "$bin" sample-check
+      - name: Image oracles (Pillow quantization tables, ExifTool metadata, numpy/PyWavelets noise maps)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q libimage-exiftool-perl
+          run=$(find ci-out/reports -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tail -n 1)
+          python tests/oracle_qt.py "ci-out/reports/$run"
+          python tests/oracle_exiftool.py "ci-out/reports/$run"
+          python tests/oracle_maps.py --reports "ci-out/reports/$run"
       - name: Real TSA smoke test (DigiCert; network-dependent, informative)
         if: runner.os == 'Windows'
         continue-on-error: true
         shell: bash
         run: |
-          cargo run --locked -q -p rv-imgauth-cli -- analyze -i examples/sample/evidence --out tsa-out --progress none > tsa.txt || test $? -eq 3
+          cargo run --locked -q -p rv-imgauth-cli -- analyze -i examples/sample/evidence --maps none --copy-move off --out tsa-out --progress none > tsa.txt || test $? -eq 3
           cat tsa.txt
           grep -q "timestamp: ok" tsa.txt
           run=$(find tsa-out/logs -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | tail -n 1)

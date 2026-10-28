@@ -20,6 +20,7 @@ pub mod imgscan;
 pub mod input;
 pub mod intake;
 pub mod report;
+pub mod review;
 pub mod run;
 pub mod time;
 pub mod trust;

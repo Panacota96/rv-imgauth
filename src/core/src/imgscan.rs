@@ -3,8 +3,11 @@
 //! maps under `maps/`) into the item folder and list them so `run.rs` hashes and audits every one. A worker
 //! process runs exactly this code (see `worker.rs`).
 //!
-//! Outputs per item: `structure.json`, `metadata.json` and the maps under `maps/` (ela.png, noise.png,
-//! noise-sigma.png, ghost-qNN.png, copymove.png, thumbnail-diff.png), each listed in `Analysis::outputs`.
+//! Outputs per item: `structure.json`, `metadata.json`, the lossless preview of the decoded original
+//! `maps/original.png` (kind `original_preview`; not for HEIC or undecodable files) and the maps under `maps/`
+//! (ela.png, noise.png, noise-sigma.png, ghost-qNN.png, copymove.png, thumbnail-diff.png), each listed in
+//! `Analysis::outputs`. The report summaries (`metadata_summary`, `structure_summary`, `qt_fingerprint.tables`,
+//! `reference_table`, `original_preview`) go into `details` next to the frozen keys.
 
 use crate::analyzer::{Analysis, AnalyzeCtx, Finding, OutputFile, Severity, analyze};
 use serde_json::{Value, json};
@@ -185,6 +188,139 @@ fn qt_findings(
     (out, json!(m))
 }
 
+/// Metadata fields shown in the reports (by tag name, in this order; every tag is in metadata.json).
+const KEY_FIELDS: [&str; 24] = [
+    "Make",
+    "Model",
+    "Software",
+    "DateTime",
+    "DateTimeOriginal",
+    "DateTimeDigitized",
+    "OffsetTime",
+    "OffsetTimeOriginal",
+    "PixelXDimension",
+    "PixelYDimension",
+    "Orientation",
+    "xmp:CreatorTool",
+    "xmp:CreateDate",
+    "xmp:ModifyDate",
+    "xmp:MetadataDate",
+    "photoshop:DateCreated",
+    "OriginatingProgram",
+    "DateCreated",
+    "SpecialInstructions",
+    "Creation Time",
+    "tIME",
+    "Comment",
+    "Description",
+    "Title",
+];
+
+/// Key EXIF/XMP/IPTC/PNG fields, tag counts per group, GPS presence, MakerNote, ICC, the XMP history and the
+/// problems met while reading (the report summary; metadata.json holds every tag).
+fn metadata_summary(img: &rv_imgauth_img::ParsedImage) -> Value {
+    let md = &img.metadata;
+    let mut fields = vec![];
+    for name in KEY_FIELDS {
+        for t in md.tags.iter().filter(|t| t.name == name) {
+            let v: String = t.value.chars().take(200).collect();
+            fields.push(json!({"group": t.group, "name": t.name, "value": v}));
+        }
+    }
+    let mut groups: std::collections::BTreeMap<&str, u64> = Default::default();
+    for t in &md.tags {
+        *groups.entry(t.group.as_str()).or_default() += 1;
+    }
+    json!({
+        "tag_count": md.tags.len(),
+        "groups": groups,
+        "fields": fields,
+        "gps_tags": md.tags.iter().filter(|t| t.group == "GPS").count(),
+        "makernote_present": md.makernote_present,
+        "icc_sha256": md.icc_sha256,
+        "xmp_present": md.xmp.is_some(),
+        "xmp_history": md.xmp_history,
+        "problems": md.problems,
+        "thumbnail_present": img.thumbnail.is_some(),
+    })
+}
+
+/// Top-level segment sequence (consecutive repeats collapsed as "IDAT ×5") and the per-format facts.
+fn structure_summary(img: &rv_imgauth_img::ParsedImage) -> Value {
+    let names: Vec<String> = match &img.jpeg {
+        Some(j) if !j.markers.is_empty() => j.markers.clone(),
+        _ => img.structure.iter().map(|s| s.kind.clone()).collect(),
+    };
+    let mut seq: Vec<(String, usize)> = vec![];
+    for n in names {
+        match seq.last_mut() {
+            Some((last, c)) if *last == n => *c += 1,
+            _ => seq.push((n, 1)),
+        }
+    }
+    let sequence: Vec<String> = seq
+        .into_iter()
+        .map(|(n, c)| if c > 1 { format!("{n} \u{00D7}{c}") } else { n })
+        .collect();
+    let mut facts: Vec<(String, String)> = vec![];
+    if let Some(j) = &img.jpeg {
+        facts.push(("frame".into(), j.sof.clone()));
+        facts.push(("chroma subsampling".into(), j.subsampling.clone()));
+        facts.push(("components".into(), j.components.len().to_string()));
+        facts.push(("restart interval".into(), j.restart_interval.to_string()));
+        facts.push(("quantization tables".into(), j.qtables.len().to_string()));
+        facts.push(("Huffman tables".into(), j.huffman.len().to_string()));
+        facts.push(("bytes after EOI".into(), j.after_eoi.to_string()));
+        facts.push(("comments".into(), j.comments.len().to_string()));
+    }
+    if let Some(p) = &img.png {
+        facts.push(("bit depth".into(), p.bit_depth.to_string()));
+        facts.push(("colour type".into(), p.color_type.to_string()));
+        facts.push(("bytes after IEND".into(), p.after_iend.to_string()));
+    }
+    if let Some(w) = &img.webp {
+        facts.push(("bitstream".into(), w.kind.clone()));
+        facts.push(("lossless".into(), w.lossless.to_string()));
+        facts.push(("VP8X flags".into(), w.flags.join(", ")));
+    }
+    if let Some(h) = &img.heif {
+        facts.push(("major brand".into(), h.major_brand.clone()));
+        facts.push(("compatible brands".into(), h.compatible_brands.join(", ")));
+        facts.push(("primary item".into(), h.primary_item.to_string()));
+        facts.push(("items".into(), h.items.len().to_string()));
+        if let Some((r, c, w, hh)) = h.grid {
+            facts.push(("grid".into(), format!("{r}\u{00D7}{c} tiles, {w}x{hh}")));
+        }
+        facts.push((
+            "unreferenced bytes".into(),
+            h.unreferenced_bytes.to_string(),
+        ));
+    }
+    json!({
+        "segments": img.structure.len(),
+        "sequence": sequence,
+        "facts": facts.iter().map(|(k, v)| json!({"name": k, "value": v})).collect::<Vec<_>>(),
+    })
+}
+
+/// The JPEG quantization tables in natural (row-major) order with the components that use them.
+fn qt_tables(j: &rv_imgauth_img::JpegInfo) -> Value {
+    json!(
+        j.qtables
+            .iter()
+            .map(|t| {
+                let users: Vec<String> = j
+                    .components
+                    .iter()
+                    .filter(|c| c.tq == t.id)
+                    .map(|c| c.id.to_string())
+                    .collect();
+                json!({"id": t.id, "precision": t.precision, "components": users, "values": t.values})
+            })
+            .collect::<Vec<_>>()
+    )
+}
+
 /// The image analysis of one item, in this process: parse → structure and metadata signals → compression
 /// fingerprints and double compression (JPEG) → pixel analyses (maps, copy-move, thumbnail) → reference
 /// comparison. Every derived file goes through a [`Writer`] so `run.rs` hashes and audits it.
@@ -282,6 +418,8 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
         "metadata",
         &crate::report::pretty(&json!(img.metadata)),
     );
+    details["metadata_summary"] = metadata_summary(&img);
+    details["structure_summary"] = structure_summary(&img);
 
     // Compression fingerprints and double compression (JPEG).
     if let Some(j) = &img.jpeg {
@@ -294,7 +432,8 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
             let (f, m) = qt_findings(&fp, &fpdbs.dbs, img.metadata.get("IFD0", "Make"));
             findings.extend(f);
             details["qt_fingerprint"] = json!({"sha256": fp.sha256, "ijg_quality": fp.ijg_quality,
-                "nearest_quality": fp.nearest_quality, "distance": fp.distance, "matches": m});
+                "nearest_quality": fp.nearest_quality, "distance": fp.distance, "matches": m,
+                "tables": qt_tables(j)});
         }
         match rv_imgauth_img::decode_coefficients(&bytes) {
             Ok(c) => findings.extend(
@@ -311,19 +450,21 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
     let mut maps: Vec<Value> = vec![];
     let pixels_total = img.width as u64 * img.height as u64;
     let want = |m: &str| o.maps.iter().any(|x| x == m);
-    let any_pixel_work = !o.maps.is_empty() || o.copy_move || img.thumbnail.is_some();
+    // Pixels are decoded for every JPEG, PNG and WebP under the cap: the preview of the original is always
+    // written, even when no map is selected.
     let pixels = if img.format == rv_imgauth_img::Format::Heif {
         findings.push(Finding::new("HEIC_PIXELS_NOT_DECODED", Severity::Info).with(
             "reason",
             "HEIF/HEVC decoding is not bundled in this version (licensing); structure and metadata were examined",
         ));
         None
-    } else if !any_pixel_work {
-        None
     } else if pixels_total > o.max_pixels {
         findings.push(
             Finding::new("ANALYSIS_SKIPPED_SIZE_CAP", Severity::Info)
-                .with("analysis", "pixel analyses (maps, copy-move, thumbnail)")
+                .with(
+                    "analysis",
+                    "pixel analyses (preview, maps, copy-move, thumbnail)",
+                )
                 .with("pixels", pixels_total.to_string())
                 .with("cap", o.max_pixels.to_string()),
         );
@@ -344,6 +485,16 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
         }
     };
     if let Some(px) = &pixels {
+        match rv_imgauth_img::analysis::pixels::preview(px, img.format) {
+            Ok(m) => {
+                let rel = format!("{MAPS_DIR}/{}", m.name);
+                if w.write(&rel, "original_preview", &m.png) {
+                    details["original_preview"] = json!({"file": rel, "width": px.width,
+                        "height": px.height, "params": m.params});
+                }
+            }
+            Err(e) => details["preview_error"] = json!(e),
+        }
         if want("ela") {
             if img.format == rv_imgauth_img::Format::Jpeg {
                 match rv_imgauth_img::analysis::ela::map(px, o.ela_quality) {
@@ -408,6 +559,7 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
     // Reference images (read-only; their hashes are recorded so the comparison can be repeated).
     if !o.references.is_empty() {
         let mut parsed = vec![];
+        let mut names: Vec<String> = vec![];
         let mut refs = vec![];
         for r in &o.references {
             match std::fs::read(r) {
@@ -416,6 +568,7 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
                     match rv_imgauth_img::parse(&b) {
                         Ok(p) => {
                             refs.push(json!({"path": r.display().to_string(), "sha256": sha, "status": "parsed"}));
+                            names.push(r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
                             parsed.push(p);
                         }
                         Err(e) => refs.push(json!({"path": r.display().to_string(), "sha256": sha, "status": "error", "error": e})),
@@ -430,6 +583,8 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
                     .iter()
                     .map(finding),
             );
+            details["reference_table"] = json!({"n": parsed.len(), "references": names,
+                "rows": rv_imgauth_img::analysis::reference::table(&img, &parsed)});
         }
         details["references"] = json!(refs);
     }

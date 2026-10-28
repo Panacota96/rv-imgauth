@@ -14,6 +14,10 @@
 <h2>{{ t.what_we_did }}</h2>
 <p>{{ t.method_text }}</p>
 
+{% if image and image.completed %}<h2>{{ t.plain_checks }}</h2>
+<div class="kv">{% for r in image.plain %}<div>{{ r.k }}</div><div>{{ r.v }}</div>{% endfor %}</div>
+{% for l in image.plain_lines %}<p>{{ l }}</p>{% endfor %}{% endif %}
+
 <h2>{{ t.what_we_found }}</h2>
 {% if findings %}<ul>{% for f in findings %}<li><strong>{{ f.title }}.</strong> {{ f.shows }}</li>{% endfor %}</ul>{% else %}<p>{{ t.none }}</p>{% endif %}
 

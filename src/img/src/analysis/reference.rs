@@ -18,6 +18,7 @@
 use super::qt;
 use super::util::sha256_hex;
 use crate::model::{Format, ParsedImage, Signal};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 fn thumb_size(t: &[u8]) -> Option<(usize, usize)> {
@@ -162,48 +163,116 @@ fn show(name: &str, v: &str, other: &str) -> String {
     }
 }
 
-pub fn compare(item: &ParsedImage, references: &[ParsedImage]) -> Vec<Signal> {
+/// One row of the reference comparison table (for the report and the viewer).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ReferenceRow {
+    pub property: String,
+    /// "consistent", "inconsistent", "varies" (the references disagree among themselves: not compared) or
+    /// "not_applicable" (the property does not apply to the item or to the references).
+    pub status: String,
+    /// The item's value and the reference value(s), shortened as in the finding text.
+    pub item: String,
+    pub reference: String,
+    /// The value of each reference image, in the order given (shortened like `reference`).
+    pub per_reference: Vec<String>,
+}
+
+/// Every property, compared as described in the module documentation. Empty without references.
+pub fn table(item: &ParsedImage, references: &[ParsedImage]) -> Vec<ReferenceRow> {
     if references.is_empty() {
         return vec![];
     }
-    let n = references.len();
     let mine = properties(item);
     let refs: Vec<_> = references.iter().map(properties).collect();
-    let mut agree = Vec::new();
-    let mut differ = Vec::new();
+    let mut rows = Vec::new();
     for (k, (name, value)) in mine.iter().enumerate() {
-        let Some(value) = value else { continue };
+        let per_reference: Vec<String> = refs
+            .iter()
+            .map(|r| {
+                let v = r[k].1.clone().unwrap_or_else(|| "\u{2014}".into());
+                let other = value.clone().unwrap_or_default();
+                show(name, &v, &other)
+            })
+            .collect();
+        let row = |status: &str, item: String, reference: String| ReferenceRow {
+            property: name.to_string(),
+            status: status.into(),
+            item,
+            reference,
+            per_reference: per_reference.clone(),
+        };
         let first = &refs[0][k].1;
-        let Some(rv) = first else { continue };
-        if !refs.iter().all(|r| r[k].1.as_ref() == Some(rv)) {
+        let (Some(value), Some(rv)) = (value, first) else {
+            rows.push(row(
+                "not_applicable",
+                value.clone().unwrap_or_else(|| "\u{2014}".into()),
+                first.clone().unwrap_or_else(|| "\u{2014}".into()),
+            ));
             continue;
-        }
-        if value == rv {
-            agree.push(name.to_string());
-        } else {
-            differ.push(format!(
-                "{name}: item {} vs reference {}",
+        };
+        if !refs.iter().all(|r| r[k].1.as_ref() == Some(rv)) {
+            let mut seen: Vec<String> = Vec::new();
+            for r in &refs {
+                let v = r[k].1.clone().unwrap_or_else(|| "\u{2014}".into());
+                let v = show(name, &v, &v);
+                if !seen.contains(&v) {
+                    seen.push(v);
+                }
+            }
+            rows.push(row("varies", show(name, value, value), seen.join(" | ")));
+        } else if value == rv {
+            rows.push(row(
+                "consistent",
                 show(name, value, rv),
-                show(name, rv, value)
+                show(name, rv, value),
+            ));
+        } else {
+            rows.push(row(
+                "inconsistent",
+                show(name, value, rv),
+                show(name, rv, value),
             ));
         }
     }
-    let mut out = Vec::new();
+    rows
+}
+
+pub fn compare(item: &ParsedImage, references: &[ParsedImage]) -> Vec<Signal> {
+    let n = references.len();
+    let rows = table(item, references);
+    let agree: Vec<&str> = rows
+        .iter()
+        .filter(|r| r.status == "consistent")
+        .map(|r| r.property.as_str())
+        .collect();
+    let differ: Vec<String> = rows
+        .iter()
+        .filter(|r| r.status == "inconsistent")
+        .map(|r| {
+            format!(
+                "{}: item {} vs reference {}",
+                r.property, r.item, r.reference
+            )
+        })
+        .collect();
+    // One finding per item about the reference set: inconsistent when any compared property differs,
+    // otherwise consistent; the per-property table (`table`) goes into the report.
     if !differ.is_empty() {
-        out.push(
+        vec![
             Signal::new("REFERENCE_INCONSISTENT", "medium")
                 .with("n", n.to_string())
-                .with("differences", differ.join("; ")),
-        );
-    }
-    if !agree.is_empty() {
-        out.push(
+                .with("differences", differ.join("; "))
+                .with("agreeing", agree.len().to_string()),
+        ]
+    } else if !agree.is_empty() {
+        vec![
             Signal::new("REFERENCE_CONSISTENT", "info")
                 .with("n", n.to_string())
                 .with("compared", agree.join(", ")),
-        );
+        ]
+    } else {
+        vec![]
     }
-    out
 }
 
 #[cfg(test)]
@@ -304,8 +373,12 @@ mod tests {
         );
         assert!(d.contains("EXIF tag count: item 3 vs reference 2"), "{d}");
         assert_eq!(s[0].params["n"], "2");
-        assert_eq!(s[1].code, "REFERENCE_CONSISTENT");
-        assert!(s[1].params["compared"].contains("MakerNote"));
+        assert_eq!(s.len(), 1, "one finding about the reference set");
+        assert!(s[0].params["agreeing"].parse::<u32>().unwrap() > 0);
+        let t = table(&edited, &refs);
+        let mk = t.iter().find(|r| r.property == "MakerNote").unwrap();
+        assert_eq!(mk.status, "consistent");
+        assert_eq!(mk.per_reference, ["present", "present"]);
     }
 
     #[test]
@@ -321,5 +394,26 @@ mod tests {
                 .is_some_and(|d| d.contains("quantization"))
         }));
         assert!(compare(&refs[0], &[]).is_empty());
+        let t = table(&img(70, 4000, 3000, &[], "4:2:0"), &refs);
+        let q = t
+            .iter()
+            .find(|r| r.property == "quantization tables")
+            .unwrap();
+        assert_eq!(q.status, "varies");
+        assert!(q.reference.contains(" | "), "{q:?}");
+        let png = t
+            .iter()
+            .find(|r| r.property == "PNG chunk sequence")
+            .unwrap();
+        assert_eq!(png.status, "not_applicable");
+        let sub = t
+            .iter()
+            .find(|r| r.property == "chroma subsampling")
+            .unwrap();
+        assert_eq!(
+            (sub.status.as_str(), sub.item.as_str()),
+            ("consistent", "4:2:0")
+        );
+        assert!(table(&refs[0], &[]).is_empty());
     }
 }
