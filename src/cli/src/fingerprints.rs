@@ -60,21 +60,46 @@ struct Learned {
 fn learn_one(path: &Path) -> Result<Learned, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
-    rv_imgauth_img::parse_any(&bytes).map_err(|e| {
-        format!(
-            "{}: cannot learn from it: image parsing is planned in this build ({})",
-            path.display(),
-            e
-        )
-    })?;
-    // TODO(img): fill producer (EXIF Software), creator (Make / Model) and traits (DQT digest).
+    let img = rv_imgauth_img::parse(&bytes)
+        .map_err(|e| format!("{}: cannot learn from it: {}", path.display(), e))?;
+    // What identifies the writer: the software string, the camera make/model, and (JPEG) the quantization
+    // tables' digest plus the chroma subsampling.
+    let mut producer = vec![];
+    for (g, n) in [("IFD0", "Software"), ("XMP", "xmp:CreatorTool")] {
+        if let Some(v) = img
+            .metadata
+            .get(g, n)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            producer.push(v.to_string());
+        }
+    }
+    let mut creator = vec![];
+    for n in ["Make", "Model"] {
+        if let Some(v) = img
+            .metadata
+            .get("IFD0", n)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            creator.push(v.to_string());
+        }
+    }
+    let mut traits = BTreeMap::new();
+    if let Some(j) = &img.jpeg {
+        if let Some(fp) = rv_imgauth_img::analysis::qt::fingerprint(j) {
+            traits.insert("qt_sha256".to_string(), fp.sha256);
+        }
+        traits.insert("subsampling".to_string(), j.subsampling.clone());
+    }
     let learned = Learned {
         path: std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
         bytes: bytes.len() as u64,
         sha256: sha256(&bytes),
-        producer: vec![],
-        creator: vec![],
-        traits: BTreeMap::new(),
+        producer,
+        creator,
+        traits,
     };
     if learned.producer.is_empty() && learned.creator.is_empty() && learned.traits.is_empty() {
         return Err(format!(
@@ -394,13 +419,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn learning_is_refused_until_images_are_parsed() {
+    fn learning_reads_tables_and_refuses_broken_files() {
         let dir = tempfile::tempdir().unwrap();
         let f = dir.path().join("a.jpg");
         std::fs::write(&f, b"\xFF\xD8\xFF\xE0").unwrap();
-        let e = learn_one(&f).err().unwrap();
-        assert!(e.contains("planned"), "{e}");
+        assert!(learn_one(&f).is_err());
         assert!(learn_one(&dir.path().join("missing.jpg")).is_err());
+        let tiny = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/tiny.jpg");
+        let l = learn_one(&tiny).unwrap();
+        assert_eq!(l.traits["qt_sha256"].len(), 64);
+        assert_eq!(l.traits["subsampling"], "4:2:0");
     }
 
     #[test]
