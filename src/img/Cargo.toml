@@ -4,6 +4,7 @@ description = "RV ImgAuth image layer: JPEG, HEIC, PNG and WebP parsing (signals
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 

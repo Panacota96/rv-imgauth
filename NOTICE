@@ -8,3 +8,12 @@ Third-party components keep their own licences.
 It includes third-party open-source components; their names and exact versions are
 listed in the SBOM published with every release (sbom.cdx.json) and in each run's
 logs/<RUN-ID>/environment.json.
+
+Image re-encoding (error level analysis and JPEG ghosts) uses the jpeg-encoder crate, whose IJG licence
+requires this acknowledgement:
+This software is based in part on the work of the Independent JPEG Group.
+
+The IJG standard quantization tables and their quality scaling (src/img/src/analysis/qt.rs) follow ITU-T T.81
+Annex K and the Independent JPEG Group's libjpeg (jcparam.c).
+
+Licences of all dependencies are checked against an allow-list (deny.toml; no GPL, AGPL or LGPL component).

@@ -6,7 +6,7 @@
 
 ## Context
 
-Reports signals of modification in JPEG, HEIC/HEIF, PNG and WebP images (metadata and structure, quantization-table fingerprints and double compression, ELA and noise maps, copy-move detection, comparison with reference images) for clients and courts; bulk folders on 8 GB Windows laptops without GPU; joins the Rust toolkit (rv-hashinv, rv-imgauth, rv-rsmf).
+Reports signals of modification in JPEG, HEIC/HEIF, PNG and WebP images (metadata and structure, quantization-table fingerprints and double compression, ELA and noise maps, copy-move detection, comparison with reference images) for clients and courts; bulk folders on 8 GB Windows laptops without GPU; joins the Rust toolkit (rv-hashinv, rv-pdfauth, rv-rsmf).
 
 Weight preset: **client**. Score overrides argued by the council:
 

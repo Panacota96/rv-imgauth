@@ -455,6 +455,11 @@
       "shows": "La structure et les métadonnées HEIC/HEIF ont été examinées ; les pixels n'ont pas été décodés (%{reason}) : pas de cartes visuelles ni de recherche de copie-déplacement.",
       "does_not_prove": "Rien n'est conclu d'analyses non exécutées."
     },
+    "PIXELS_NOT_DECODED": {
+      "title": "Les pixels n'ont pas pu être décodés",
+      "shows": "Le décodeur %{format} a refusé les données d'image (%{reason}) : aucun aperçu, aucune carte, aucune recherche de copier-déplacer ni comparaison de vignette n'a été faite pour ce fichier. La structure, les métadonnées et les tables ont tout de même été examinées.",
+      "does_not_prove": "Des fichiers endommagés, des choix d'encodage inhabituels mais valides et les limites du décodeur en sont tous la cause ; cela ne montre pas que le fichier a été modifié, et les analyses non exécutées n'indiquent rien dans un sens ou dans l'autre."
+    },
     "ANALYSIS_SKIPPED_SIZE_CAP": {
       "title": "Analyse ignorée pour la taille",
       "shows": "%{analysis} a été ignorée : l'image compte %{pixels} pixels, au-delà du plafond de %{cap} (--max-pixels).",

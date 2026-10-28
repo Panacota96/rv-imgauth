@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 
 /// Accepted ranges for the numeric analysis options (values outside are clamped, never refused).
 pub const ELA_QUALITY_RANGE: RangeInclusive<u8> = 1..=100;
-pub const MAX_PIXELS_RANGE: RangeInclusive<u64> = 1_000_000..=2_000_000_000;
+/// Up to the image layer's own hard limit: a larger value would have no effect.
+pub const MAX_PIXELS_RANGE: RangeInclusive<u64> =
+    1_000_000..=rv_imgauth_img::analysis::pixels::MAX_PIXELS;
 pub const TIMEOUT_RANGE: RangeInclusive<u64> = 10..=3600;
 pub const MEMORY_RANGE: RangeInclusive<u64> = 256..=65536;
 /// Analysis maps the user can select (CLI `--maps`), in canonical order.

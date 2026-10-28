@@ -152,6 +152,10 @@ pub(crate) fn jpeg_structure(p: &ParsedImage, mpf_bytes: u64) -> Vec<Signal> {
                     "note",
                     format!("{mpf_bytes} of these bytes are secondary images listed in the APP2/MPF index"),
                 );
+            // Only images the file itself indexes (phones' depth maps, previews): ordinary, so informational.
+            if mpf_bytes >= j.after_eoi {
+                s.severity = "info".into();
+            }
         }
         v.push(s);
     }

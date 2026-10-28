@@ -89,7 +89,7 @@ Same engine and results: [usage-gui.md](usage-gui.md).
 | `--maps LIST` | `ela,noise` | Maps per image: `ela` (JPEG only, `ela.png`), `noise` (`noise.png`, `noise-sigma.png`), `ghosts` (JPEG only, `ghost-q50…q90.png`, images ≤ 24 MP), or `none`. `maps/original.png` and `thumbnail-diff.png` are written whatever is selected |
 | `--copy-move on\|off` | `on` | Copy-move search; `copymove.png` when a candidate is found |
 | `--ela-quality Q` | `95` | Re-compression quality for ELA (1–100); recorded with the map |
-| `--max-pixels N` | `100000000` | Images with more pixels are not decoded (`ANALYSIS_SKIPPED_SIZE_CAP`); range 1 000 000–2 000 000 000, but the image layer never decodes more than **120 000 000** pixels ([admissibility.md](admissibility.md#consolidated-gap-list) G-IMG3) |
+| `--max-pixels N` | `100000000` | Images with more pixels are not decoded (`ANALYSIS_SKIPPED_SIZE_CAP`); range 1 000 000–120 000 000 (the image layer's hard limit) |
 | `--reference FILE` | none | Known original to compare every item with; repeatable ([§10](#10-reference-images)) |
 | `--fingerprints-db FILE` | none | Extra fingerprint database on top of the bundled and local ones |
 | `--item-reports all\|flagged` | `all` | `flagged`: report files only for items with a finding above info |
@@ -147,11 +147,11 @@ should do before relying on one. Severities and the full catalogue: [reports.md]
 | `DATA_AFTER_END_MARKER`, `HEIF_UNREFERENCED_DATA`, `PNG_PRIVATE_CHUNKS` | Extract and examine the extra bytes separately (offsets in `structure.json`); MPF secondary images are normal on phones |
 | `PNG_CHUNK_ORDER_INVALID`, `WEBP_FLAGS_MISMATCH`, `HEIF_STRUCTURE_ANOMALY`, `FILE_STRUCTURE_DAMAGED` | Interrupted copy or byte-level edit? Compare with the source if available |
 | `ELA_MAP_WRITTEN`, `NOISE_INCONSISTENCY_MAP` | Info only: say in the report which maps you examined and what you saw, never "the map proves" |
-| `HEIC_PIXELS_NOT_DECODED`, `ANALYSIS_SKIPPED_SIZE_CAP`, `COEFFICIENTS_UNAVAILABLE`, `ELA_NOT_APPLICABLE` | An analysis did not run: nothing is concluded from it; say so |
+| `HEIC_PIXELS_NOT_DECODED`, `PIXELS_NOT_DECODED`, `ANALYSIS_SKIPPED_SIZE_CAP`, `COEFFICIENTS_UNAVAILABLE`, `ELA_NOT_APPLICABLE` | An analysis did not run: nothing is concluded from it; say so |
 | `PARSER_FAILED` | See [§11](#11-troubleshooting-and-exit-codes) |
 
-Also check `technical.json` → `image.pixel_decode_error`: when the pixels of a PNG or WebP cannot be decoded, no
-pixel analysis runs and no finding says so (gap G-IMG4).
+When the pixels of a JPEG, PNG or WebP cannot be decoded, `PIXELS_NOT_DECODED` gives the decoder's reason (also in
+`technical.json` → `image.pixel_decode_error`) and no pixel analysis runs.
 
 ## 6. Timestamps
 
@@ -298,7 +298,7 @@ is recorded in the report.
 | `PARSER_FAILED` "image structure not readable" | The file is not parseable as the format its signature claims |
 | `ANALYSIS_SKIPPED_SIZE_CAP` | Above `--max-pixels` (pixel analyses) or above 24 MP (ghosts). Raise `--max-pixels` up to 120 000 000 |
 | `COEFFICIENTS_UNAVAILABLE` | Progressive or arithmetic-coded JPEG, or damaged entropy data: no double-compression check |
-| No maps for a PNG or WebP | Pixels did not decode: see `image.pixel_decode_error` in `technical.json` |
+| No maps for a PNG or WebP | Pixels did not decode: see the `PIXELS_NOT_DECODED` finding |
 | `HEIC_PIXELS_NOT_DECODED` | By design in this version |
 | `EVIDENCE_CHANGED_DURING_ANALYSIS` | Another program changed the file between the two reads: re-run on a write-protected copy |
 | GUI: "Could not write this run's review log" | The run's audit log no longer verifies or the folder is read-only; the view is recorded in the next run's audit log instead |

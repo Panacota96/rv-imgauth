@@ -473,6 +473,11 @@ pub fn analyze_image(ctx: &AnalyzeCtx) -> Analysis {
         match rv_imgauth_img::decode_pixels(&bytes, img.format) {
             Ok(p) => Some(p),
             Err(e) => {
+                findings.push(
+                    Finding::new("PIXELS_NOT_DECODED", Severity::Low)
+                        .with("format", img.format.name())
+                        .with("reason", e.clone()),
+                );
                 details["pixel_decode_error"] = json!(e);
                 None
             }

@@ -4,6 +4,7 @@ description = "RV ImgAuth desktop interface (Windows 10/11, also builds on Linux
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 # egui/eframe/epaint 0.37 declare rust-version 1.95 (the rest of the workspace needs 1.88).
 rust-version = "1.95"
 authors.workspace = true
@@ -22,9 +23,7 @@ eframe.workspace = true
 serde_json.workspace = true
 # Image viewer: decode the PNG maps written by the core.
 png.workspace = true
-
-[dev-dependencies]
-# Example `viewer_screenshot` only: decodes the sample JPEG when the analysis wrote no original preview.
+# The image layer's limits (MAX_PIXELS); the screenshot example also decodes with it.
 rv-imgauth-img.workspace = true
 
 # Native file/folder pickers on Windows (no GTK/portal dependency elsewhere: a text field is used instead).

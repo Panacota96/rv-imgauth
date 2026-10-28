@@ -13,13 +13,13 @@ rv-imgauth analyze -i examples/sample/evidence -r --maps ela,noise,ghosts \
 
 | File | What it holds | Expected findings (exact) |
 | --- | --- | --- |
-| `evidence/bad-order.png` | PNG with a chunk-order violation, a private chunk and data after IEND (pixels do not decode: no maps) | DATA_AFTER_END_MARKER, PNG_CHUNK_ORDER_INVALID, PNG_PRIVATE_CHUNKS, REFERENCE_INCONSISTENT |
+| `evidence/bad-order.png` | PNG with a chunk-order violation, a private chunk and data after IEND (pixels do not decode: no maps) | DATA_AFTER_END_MARKER, PNG_CHUNK_ORDER_INVALID, PIXELS_NOT_DECODED, PNG_PRIVATE_CHUNKS, REFERENCE_INCONSISTENT |
 | `evidence/camera-original.jpg` | Synthetic camera original: EXIF Make/Model/dates, MakerNote, thumbnail, non-IJG tables | ELA_MAP_WRITTEN, NOISE_INCONSISTENCY_MAP, QT_NON_STANDARD, QT_UNKNOWN, REFERENCE_CONSISTENT |
-| `evidence/crash.jpg` | Damaged 15-byte JPEG: reported, and the run goes on | COEFFICIENTS_UNAVAILABLE, FILE_STRUCTURE_DAMAGED, REFERENCE_INCONSISTENT |
+| `evidence/crash.jpg` | Damaged 15-byte JPEG: reported, and the run goes on | COEFFICIENTS_UNAVAILABLE, FILE_STRUCTURE_DAMAGED, PIXELS_NOT_DECODED, REFERENCE_INCONSISTENT |
 | `evidence/edited-gimp.jpg` | Re-saved with IJG q=85, Software GIMP, later DateTime, XMP history | ELA_MAP_WRITTEN, EXIF_SOFTWARE_EDITOR, METADATA_DATES_INCONSISTENT, NOISE_INCONSISTENCY_MAP, QT_STANDARD_IJG, QT_UNKNOWN, REFERENCE_INCONSISTENT, XMP_EDIT_HISTORY |
 | `evidence/iphone-like.heic` | Hand-built HEIF box structure (no HEVC payload): structure and metadata only | HEIC_PIXELS_NOT_DECODED, HEIF_STRUCTURE_ANOMALY, HEIF_UNREFERENCED_DATA, REFERENCE_INCONSISTENT |
 | `evidence/no-metadata.jpg` | JPEG without any metadata | ELA_MAP_WRITTEN, METADATA_STRIPPED, NOISE_INCONSISTENCY_MAP, QT_STANDARD_IJG, QT_UNKNOWN, REFERENCE_INCONSISTENT |
-| `evidence/photo.webp` | VP8X with the EXIF flag set but no EXIF chunk (pixels do not decode: no maps) | REFERENCE_INCONSISTENT, WEBP_FLAGS_MISMATCH |
+| `evidence/photo.webp` | VP8X with the EXIF flag set but no EXIF chunk (pixels do not decode: no maps) | PIXELS_NOT_DECODED, REFERENCE_INCONSISTENT, WEBP_FLAGS_MISMATCH |
 | `evidence/pix-copy-move.jpg` | A textured patch duplicated 200 px to the right | COPY_MOVE_CANDIDATE, ELA_MAP_WRITTEN, METADATA_STRIPPED, NOISE_INCONSISTENCY_MAP, QT_STANDARD_IJG, QT_UNKNOWN, REFERENCE_INCONSISTENT |
 | `evidence/pix-natural.jpg` | Clean single save at q=92 (negative control) | ELA_MAP_WRITTEN, METADATA_STRIPPED, NOISE_INCONSISTENCY_MAP, QT_STANDARD_IJG, QT_UNKNOWN, REFERENCE_INCONSISTENT |
 | `evidence/pix-spliced-ghost.jpg` | A region from a q=60 save pasted into a q=90 image | ELA_MAP_WRITTEN, JPEG_GHOST_REGION, METADATA_STRIPPED, NOISE_INCONSISTENCY_MAP, QT_STANDARD_IJG, QT_UNKNOWN, REFERENCE_INCONSISTENT |

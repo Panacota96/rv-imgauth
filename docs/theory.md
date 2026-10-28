@@ -415,7 +415,7 @@ The top-level nodes therefore cover the file without gaps; offsets and lengths a
 | --- | --- | --- |
 | `JPEG_MARKER_ORDER_UNUSUAL` | APP0/JFIF not right after SOI; APP1/Exif not right after SOI (or after the JFIF APP0); when EXIF names a Make or Model, an APPn segment after the first table or frame segment; reasons listed in `expected` | medium |
 | `DUPLICATE_TABLES` | a quantization table id defined more than once anywhere, or a Huffman table id defined twice between two scans | medium |
-| `DATA_AFTER_END_MARKER` | bytes after EOI; when an APP2/MPF index lists secondary images their bytes are counted apart (`mpf_bytes`, `other_bytes`), but the finding is raised (medium) even when every trailing byte is an MPF image | medium |
+| `DATA_AFTER_END_MARKER` | bytes after EOI; when an APP2/MPF index lists secondary images their bytes are counted apart (`mpf_bytes`, `other_bytes`), and when every trailing byte is an MPF image (normal for phones) the finding is informational | medium; info if MPF only |
 | `PROGRESSIVE_ENCODING` | SOF2 (or another progressive SOF) | low |
 
 `decode_coefficients` decodes sequential Huffman scans (SOF0/SOF1), interleaved or not, with restart intervals,
@@ -551,10 +551,9 @@ manipulation.
 | HEIF/HEIC | none | never decoded in v1 |
 
 Images above `--max-pixels` (default 100 MP, range 1–2000 MP) are not decoded (`ANALYSIS_SKIPPED_SIZE_CAP`). The
-image layer also refuses anything above a **hard cap of 120 MP** whatever `--max-pixels` says (see the
-disagreement note in [admissibility.md](admissibility.md#consolidated-gap-list), G-IMG3). A decoding error is
-recorded in `technical.json` → `image.pixel_decode_error` and no pixel analysis runs (no finding is raised for
-it; see G-IMG4).
+image layer's **hard cap of 120 MP** is also the upper bound of `--max-pixels` (the CLI and GUI refuse a larger
+value). A decoding error raises `PIXELS_NOT_DECODED` (low) with the decoder's reason, is recorded in
+`technical.json` → `image.pixel_decode_error`, and no pixel analysis runs.
 
 `maps/original.png` is the lossless RGB8 preview of exactly the pixels every analysis saw; viewers draw the maps
 over it. Luma everywhere is integer BT.601: `Y = (19595 R + 38470 G + 7471 B + 32768) >> 16`.

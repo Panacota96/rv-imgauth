@@ -455,6 +455,11 @@
       "shows": "The HEIC/HEIF structure and metadata were examined; the pixels were not decoded (%{reason}), so no visual maps or copy-move search were made.",
       "does_not_prove": "Nothing is concluded from analyses that were not run."
     },
+    "PIXELS_NOT_DECODED": {
+      "title": "Pixels could not be decoded",
+      "shows": "The %{format} decoder refused the image data (%{reason}), so no preview, map, copy-move search or thumbnail comparison was made for this file. Structure, metadata and tables were still examined.",
+      "does_not_prove": "Damaged files, unusual but valid encoder choices and decoder limits all cause this; it does not show that the file was altered, and the analyses that did not run say nothing either way."
+    },
     "ANALYSIS_SKIPPED_SIZE_CAP": {
       "title": "Analysis skipped for size",
       "shows": "%{analysis} was skipped: the image has %{pixels} pixels, above the cap of %{cap} (--max-pixels).",

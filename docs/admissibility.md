@@ -380,8 +380,8 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 | G23 | Windows: no OS-level network block for the worker | CO-D1 | Offline workstation or firewall rule | AppContainer / WFP | Eng. |
 | G-IMG1 | **Fingerprint starter DB is empty** (`rakvor-starter` version 0, 0 entries): every JPEG gives `QT_UNKNOWN` unless the local DB was taught | CO-L4, US-8 | Learn known originals per case (`fingerprints learn`) and disclose the DB (`fingerprints export`) | Seed the starter DB from Rakvor's own captures | Eng. |
 | G-IMG2 | **HEIC/HEIF pixels not decoded**: no maps, copy-move or thumbnail comparison for HEIC (`HEIC_PIXELS_NOT_DECODED`) | ISO-9 | Obtain another version, or convert with a documented tool and analyse the conversion as a derived item | Optional OS codec (Windows HEIF extension) after legal review of HEVC licensing | Eng. + Counsel |
-| G-IMG3 | `--max-pixels` accepts up to 2 000 MP but the image layer refuses anything above 120 MP: a larger cap silently has no effect (no finding; `pixel_decode_error` only) | ISO-4 | Keep `--max-pixels` ≤ 120 000 000 | Align the CLI range with the hard cap or raise a finding | Eng. |
-| G-IMG4 | A pixel-decoding failure (e.g. `bad-order.png`, `photo.webp` in the sample) is recorded only as `image.pixel_decode_error`: no finding says that ELA, noise, copy-move and the thumbnail check were not run | ISO-4, SW-3 | Check `pixel_decode_error` in `technical.json` | Emit a finding (info) for a skipped pixel analysis | Eng. |
+| G-IMG3 | *Closed:* `--max-pixels` is limited to the image layer's 120 MP hard cap in the CLI and GUI, so the cap stated in the report is the one applied | ISO-4 | — | — | Eng. |
+| G-IMG4 | *Closed:* a pixel-decoding failure raises `PIXELS_NOT_DECODED` (low, with the decoder's reason), so the report states that ELA, noise, copy-move and the thumbnail check were not run | ISO-4, SW-3 | — | — | Eng. |
 | G-IMG5 | Method simplifications: ghosts on grid offset (0,0) only; no Lin per-block posterior map; no Mahdian–Saic block merging; copy-move translation only (no keypoints) | CO-P11, US-8 | Stated in [theory.md](theory.md) and in the limitations | Implement the full methods, keypoint screening | Eng. |
 | G-IMG6 | Reference comparison of a PNG/WebP/HEIC item against JPEG references reports `REFERENCE_INCONSISTENT` (medium) on format alone | CO-J3 | Give references of the same format | Treat a different format as not applicable | Eng. |
 
@@ -401,7 +401,7 @@ second-read re-hash, G20, is implemented here too: F2).
 7. **The run is complete** (`run_finished`) and `rv-imgauth verify-log <log folder>` prints OK, including the review
    entries; `python tests/verify_chain.py <log folder>` exits 0.
 8. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify`).
-9. **No `PARSER_FAILED`, `ANALYSIS_SKIPPED_SIZE_CAP`, `COEFFICIENTS_UNAVAILABLE` or `pixel_decode_error` left
+9. **No `PARSER_FAILED`, `ANALYSIS_SKIPPED_SIZE_CAP`, `COEFFICIENTS_UNAVAILABLE` or `PIXELS_NOT_DECODED` left
    unexplained**; HEIC items are declared as structure-only.
 10. **Every map relied on was examined by the examiner** in the viewer (recorded in `review.jsonl`) and is described
     with its recorded parameters; no map is presented as a result.

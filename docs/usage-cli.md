@@ -245,10 +245,11 @@ Options:
 
       --max-pixels <N>
           Images with more pixels than this are not decoded (protection against decompression
-          bombs), 1000000 to 2000000000: no preview, map, copy-move or thumbnail comparison
-          (ANALYSIS_SKIPPED_SIZE_CAP); structure, metadata and tables are still examined.
+          bombs), 1000000 to 120000000 (the image layer's hard limit): no preview, map, copy-move
+          or thumbnail comparison (ANALYSIS_SKIPPED_SIZE_CAP); structure, metadata and tables are
+          still examined.
           Default: 100000000 (100 megapixels)
-          Example: --max-pixels 250000000
+          Example: --max-pixels 25000000
 
       --reference <FILE>
           Reference image (a known original from the claimed device) to compare every item with.

@@ -30,7 +30,7 @@ const GREY: egui::Color32 = egui::Color32::from_rgb(0x9A, 0xA4, 0xB2);
 // Preset values for the numeric options (one click = one audited change; the current value is always listed).
 const ELA_QUALITY_PRESETS: [u8; 5] = [75, 85, 90, 95, 100];
 /// Megapixels (the option is stored in pixels).
-const MEGAPIXEL_PRESETS: [u64; 6] = [25, 50, 100, 200, 500, 1000];
+const MEGAPIXEL_PRESETS: [u64; 4] = [25, 50, 100, 120];
 const TIMEOUT_PRESETS: [u64; 5] = [60, 120, 300, 600, 1800];
 const MEMORY_PRESETS: [u64; 5] = [1024, 2048, 4096, 8192, 16384];
 

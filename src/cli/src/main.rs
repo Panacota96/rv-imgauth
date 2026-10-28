@@ -509,11 +509,12 @@ struct AnalyzeArgs {
     ela_quality: u8,
 
     /// Images with more pixels than this are not decoded (protection against decompression
-    /// bombs), 1000000 to 2000000000: no preview, map, copy-move or thumbnail comparison
-    /// (ANALYSIS_SKIPPED_SIZE_CAP); structure, metadata and tables are still examined.
+    /// bombs), 1000000 to 120000000 (the image layer's hard limit): no preview, map, copy-move
+    /// or thumbnail comparison (ANALYSIS_SKIPPED_SIZE_CAP); structure, metadata and tables are
+    /// still examined.
     /// Default: 100000000 (100 megapixels)
-    /// Example: --max-pixels 250000000
-    #[arg(long, value_name = "N", default_value_t = 100_000_000, value_parser = clap::value_parser!(u64).range(1_000_000..=2_000_000_000), verbatim_doc_comment, hide_default_value = true)]
+    /// Example: --max-pixels 25000000
+    #[arg(long, value_name = "N", default_value_t = 100_000_000, value_parser = clap::value_parser!(u64).range(1_000_000..=rv_imgauth_img::analysis::pixels::MAX_PIXELS), verbatim_doc_comment, hide_default_value = true)]
     max_pixels: u64,
 
     /// Reference image (a known original from the claimed device) to compare every item with.

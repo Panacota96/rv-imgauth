@@ -12,6 +12,7 @@
   "files": {
     "bad-order.png": [
       "DATA_AFTER_END_MARKER",
+      "PIXELS_NOT_DECODED",
       "PNG_CHUNK_ORDER_INVALID",
       "PNG_PRIVATE_CHUNKS",
       "REFERENCE_INCONSISTENT"
@@ -26,6 +27,7 @@
     "crash.jpg": [
       "COEFFICIENTS_UNAVAILABLE",
       "FILE_STRUCTURE_DAMAGED",
+      "PIXELS_NOT_DECODED",
       "REFERENCE_INCONSISTENT"
     ],
     "edited-gimp.jpg": [
@@ -53,6 +55,7 @@
       "REFERENCE_INCONSISTENT"
     ],
     "photo.webp": [
+      "PIXELS_NOT_DECODED",
       "REFERENCE_INCONSISTENT",
       "WEBP_FLAGS_MISMATCH"
     ],

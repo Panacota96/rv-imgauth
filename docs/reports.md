@@ -127,7 +127,7 @@ Every code with its severity as emitted by the code of this commit and its title
 | `REGISTRY_PATH_CONTENT_CHANGED` | medium | Registered path now holds different content |
 | `JPEG_MARKER_ORDER_UNUSUAL` | medium | Unusual JPEG segment order |
 | `DUPLICATE_TABLES` | medium | Tables defined twice |
-| `DATA_AFTER_END_MARKER` | medium | Data after the end of the image |
+| `DATA_AFTER_END_MARKER` | medium (info when only MPF images) | Data after the end of the image |
 | `PROGRESSIVE_ENCODING` | low | Progressive JPEG |
 | `PNG_CHUNK_ORDER_INVALID` | medium | PNG chunks out of the required order |
 | `PNG_PRIVATE_CHUNKS` | low | Private PNG chunks |
@@ -160,6 +160,7 @@ Every code with its severity as emitted by the code of this commit and its title
 | `REFERENCE_INCONSISTENT` | medium | Inconsistent with the reference set |
 | `REFERENCE_CONSISTENT` | info | Consistent with the reference set |
 | `HEIC_PIXELS_NOT_DECODED` | info | HEIC pixels not analysed |
+| `PIXELS_NOT_DECODED` | low | Pixels could not be decoded |
 | `ANALYSIS_SKIPPED_SIZE_CAP` | info | Analysis skipped for size |
 
 Wording lives in `i18n/en.json`, `es.json`, `fr.json` (same keys in all three — enforced by a test).

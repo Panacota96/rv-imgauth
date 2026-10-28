@@ -455,6 +455,11 @@
       "shows": "Se examinaron la estructura y los metadatos HEIC/HEIF; los píxeles no se decodificaron (%{reason}), así que no hay mapas visuales ni búsqueda de copia-desplazamiento.",
       "does_not_prove": "No se concluye nada de análisis no ejecutados."
     },
+    "PIXELS_NOT_DECODED": {
+      "title": "No se pudieron decodificar los píxeles",
+      "shows": "El decodificador %{format} rechazó los datos de imagen (%{reason}), por lo que no se generó vista previa, mapa, búsqueda de copia-desplazamiento ni comparación de miniatura para este archivo. La estructura, los metadatos y las tablas sí se examinaron.",
+      "does_not_prove": "Archivos dañados, elecciones de codificación inusuales pero válidas y límites del decodificador lo causan por igual; no muestra que el archivo se haya alterado, y los análisis que no se ejecutaron no indican nada en ningún sentido."
+    },
     "ANALYSIS_SKIPPED_SIZE_CAP": {
       "title": "Análisis omitido por tamaño",
       "shows": "Se omitió %{analysis}: la imagen tiene %{pixels} píxeles, más que el límite de %{cap} (--max-pixels).",
