@@ -25,13 +25,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 * PIXELS_NOT_DECODED finding; --max-pixels bounded by the 120 MP hard cap; MPF-only trailers are info; cargo-deny ([74a1410](https://github.com/Panacota96/rv-imgauth/commit/74a14109c218346004cb165f27fceabba87d11b0))
 
-## [Unreleased]
-
-First release line of the image analyses (0.x). No version has been tagged yet: `version.txt` and
-`.release-please-manifest.json` say 0.1.0, which release-please treats as already released, so its next release PR
-would propose 0.2.0 unless the manifest is adjusted (to decide before the first tag).
-
-### Added
+### Highlights
 
 - **Image analysis** of JPEG, HEIC/HEIF, PNG and WebP (by signature or extension), each image in an isolated worker
   process (time and memory limits, no network code; empty network namespace on Linux) that re-hashes the bytes it
@@ -65,6 +59,9 @@ would propose 0.2.0 unless the manifest is adjusted (to decide before the first 
   metadata, numpy/PyWavelets maps); cargo-fuzz targets for the parsers.
 - Documentation rewritten for images: theory (plain language and expert), admissibility (draft pending legal
   review), usage, CLI, GUI, reports, architecture, installation, case folder, forensic audit.
+- Run findings when an analysis could not run: `FILE_STRUCTURE_DAMAGED`, `PIXELS_NOT_DECODED`,
+  `HEIC_PIXELS_NOT_DECODED`, `ANALYSIS_SKIPPED_SIZE_CAP` (`--max-pixels` up to the 120 MP hard cap).
+- Dependency licences checked in CI (cargo-deny; no GPL, AGPL or LGPL).
 
 ### Known limitations
 
