@@ -295,7 +295,7 @@ fn reports_have_image_sections_in_every_language() {
         let tech = std::fs::read_to_string(item.join(format!("technical.{}.html", lang))).unwrap();
         for key in [
             "image_analysis",
-            "image_analysis_not_implemented",
+            "image_analysis_not_an_image",
             "fingerprint_dbs",
             "analysis_maps",
             "maps_none",
@@ -321,14 +321,14 @@ fn reports_have_image_sections_in_every_language() {
         }
     }
     let tech = json(&item.join("technical.json"));
-    assert_eq!(tech["image"]["analysis"], "not_implemented");
-    assert_eq!(tech["image"]["evidence_rehash"]["match"], true);
+    // foto-vacaciones.jpg is a PDF under a .jpg name: no image to examine, the inventory finding says so.
+    assert_eq!(tech["image"]["analysis"], "not_an_image");
     assert!(
         tech["findings"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|f| f["code"] == "ANALYSIS_NOT_IMPLEMENTED" && f["severity"] == "info")
+            .any(|f| f["code"] == "EXTENSION_MISMATCH")
     );
     assert!(
         tech["limitations"]

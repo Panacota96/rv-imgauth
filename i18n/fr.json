@@ -113,7 +113,8 @@
     "image_analysis_completed": "Terminée",
     "fingerprint_dbs": "Bases d'empreintes",
     "analysis_maps": "Cartes d'analyse",
-    "maps_none": "Aucune carte d'analyse n'a été produite pour ce fichier."
+    "maps_none": "Aucune carte d'analyse n'a été produite pour ce fichier.",
+    "image_analysis_not_an_image": "Pas une image (le contenu n'a pas de signature d'image)"
   },
   "severity": {
     "high": "Élevée",

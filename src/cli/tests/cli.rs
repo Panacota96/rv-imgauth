@@ -551,9 +551,10 @@ fn light_analysis() -> rv_imgauth_core::analyzer::DomainOptions {
 fn clean_evidence(dir: &Path) -> PathBuf {
     let ev = dir.join("evidence");
     std::fs::create_dir_all(&ev).unwrap();
-    std::fs::write(
+    // A real (tiny, synthetic) JPEG, so the image analysis completes.
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/tiny.jpg"),
         ev.join("a-photo.jpg"),
-        b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\xFF\xD9",
     )
     .unwrap();
     std::fs::copy(sample().join("acta.txt"), ev.join("b-acta.txt")).unwrap();

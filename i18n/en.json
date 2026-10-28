@@ -113,7 +113,8 @@
     "image_analysis_completed": "Completed",
     "fingerprint_dbs": "Fingerprint databases",
     "analysis_maps": "Analysis maps",
-    "maps_none": "No analysis map was written for this item."
+    "maps_none": "No analysis map was written for this item.",
+    "image_analysis_not_an_image": "Not an image (content has no image signature)"
   },
   "severity": {
     "high": "High",

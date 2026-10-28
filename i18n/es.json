@@ -110,10 +110,11 @@
     "image_analysis": "Análisis de la imagen",
     "image_analysis_not_implemented": "Previsto: aún no implementado en esta versión",
     "image_analysis_not_completed": "No terminó",
-    "image_analysis_completed": "Terminado",
+    "image_analysis_completed": "Completado",
     "fingerprint_dbs": "Bases de huellas",
     "analysis_maps": "Mapas de análisis",
-    "maps_none": "No se generó ningún mapa de análisis para este archivo."
+    "maps_none": "No se generó ningún mapa de análisis para este archivo.",
+    "image_analysis_not_an_image": "No es una imagen (el contenido no tiene firma de imagen)"
   },
   "severity": {
     "high": "Alta",
