@@ -82,6 +82,36 @@ hif. Other files get the inventory checks only (type by signature, extension mis
 
 Same engine and results: [usage-gui.md](usage-gui.md).
 
+### Starting from RV Hub: `--case-dir` and `describe --json`
+
+RV Hub (the Rakvor launcher) finds the installed tools, opens them on a case folder and suggests which one fits a
+file. It relies on two entry points of RV ImgAuth:
+
+- **`rv-imgauth-gui.exe --case-dir <CASE> [FILES...]`** starts the desktop app with **Case folder** already filled
+  (`--case-dir=<CASE>` also works). Other arguments are pre-loaded as evidence, as when files are dropped on the
+  icon. The preset is written to the run's audit log as `ui_case_dir_from_launcher` (path and `at_utc`) followed by
+  `ui_case_dir_changed`. `--case-dir` without a folder is ignored: the window says so and the audit log records
+  `ui_launch_argument_ignored`.
+- **`rv-imgauth describe --json`** prints one JSON object (sorted keys) that RV Hub reads; it is hidden from
+  `rv-imgauth --help` but listed in [usage-cli.md](usage-cli.md). It reads and writes nothing. Schema:
+  [`schemas/describe.schema.json`](../schemas/describe.schema.json) (`rakvor.describe/1`, identical in every Rakvor
+  tool).
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | `rakvor.describe/1` |
+| `tool`, `title`, `version` | `rv-imgauth`, `RV ImgAuth`, the product version (`version.txt`) |
+| `role` | `analysis` (examines evidence registered in the case folder) |
+| `main_verb` | `analyze`: the command that does the main work |
+| `accepts` | `extensions` (lower case, no dot) and content `signatures` (`format` + `match`: hex bytes at an offset); `"*"` = any file |
+| `case_formats`, `log_formats` | `rakvor.case/1`; `rakvor.audit/1` = `logs/audit.jsonl`, `rakvor.review/1` = `logs/review.jsonl` |
+| `cli_exe`, `gui_exe` | `rv-imgauth.exe`, `rv-imgauth-gui.exe` |
+| `exit_codes` | The meaning of 0, 1, 2, 3 and 130 (the exit-code table under Troubleshooting) |
+
+```powershell
+rv-imgauth describe --json
+```
+
 ## 3. Analysis options
 
 | Option | Default | Effect |
@@ -287,7 +317,7 @@ is recorded in the report.
 | 3 | Completed with at least one high-severity finding, or a broken audit/review log or case folder |
 | 130 | Cancelled with Ctrl+C (partial reports written) |
 
-`fingerprints`, `verify-log`, `verify-case`, `timestamp` and `self-test` have their own codes, listed in
+`fingerprints`, `verify-log`, `verify-case`, `timestamp`, `self-test` and `describe` have their own codes, listed in
 [usage-cli.md](usage-cli.md).
 
 | Symptom | Cause and fix |
