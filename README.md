@@ -87,6 +87,9 @@ How each one works, with exact parameters and references: [docs/theory.md](docs/
 Check the download before use — `SHA256SUMS`, provenance attestation, and the Authenticode signature against the
 Rakvor root certificate — step by step in [docs/installation.md](docs/installation.md).
 
+> **Upgrading from 0.2.0.** If you installed RV ImgAuth 0.2.0 on a machine that also has RV PdfAuth, reinstall RV PdfAuth: 0.2.0 shared its installer identity. (Its installer used RV PDFAuth's AppId, so installing or
+> uninstalling one could upgrade or remove the other; later versions have their own.)
+
 **From source** (Rust 1.88+ for the CLI, 1.95+ for the GUI; releases use the toolchain pinned in
 `rust-toolchain.toml`):
 

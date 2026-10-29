@@ -154,6 +154,11 @@ Double-click `rv-imgauth-X.Y.Z-windows-x64-setup.exe` (English, Spanish or Frenc
 offers two tasks: **Add the rv-imgauth command to PATH** (user PATH, checked on first install) and a desktop icon.
 Open a **new** terminal afterwards for PATH to apply.
 
+> **Upgrading from 0.2.0.** If you installed RV ImgAuth 0.2.0 on a machine that also has RV PdfAuth, reinstall RV PdfAuth: 0.2.0 shared its installer identity. The 0.2.0 installer used RV PDFAuth's
+> Inno Setup AppId `{B2454915-B966-44CD-9C5B-5413F38185AE}`, so Windows treated both tools as one program: installing
+> or uninstalling one could upgrade or remove the other's files and uninstall entry. Later versions of RV ImgAuth install
+> under their own AppId `{04A0C3C3-4929-42ED-81F7-93DB361940C8}`; reinstalling RV PDFAuth restores its entry.
+
 Unattended:
 
 ```powershell

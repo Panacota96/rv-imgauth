@@ -8,7 +8,7 @@
 #endif
 
 [Setup]
-AppId={{B2454915-B966-44CD-9C5B-5413F38185AE}
+AppId={{04A0C3C3-4929-42ED-81F7-93DB361940C8}
 AppName=RV ImgAuth
 AppVersion={#AppVersion}
 AppPublisher=Rakvor
