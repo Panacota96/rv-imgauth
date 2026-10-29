@@ -69,3 +69,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - The bundled starter fingerprint database is empty (version 0).
 - HEIC/HEIF pixels are not decoded (structure and metadata only).
 - Copy-move finds translated copies only; JPEG ghosts use the (0,0) grid offset only.
+
+## [Unreleased]
+
+Release-please writes each release entry above from the Conventional Commits; changes not yet released are
+listed in the open release PR.
