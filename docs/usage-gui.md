@@ -103,6 +103,12 @@ closed by then). `rv-imgauth verify-log` and `verify-case` check it ("review ent
 foreign entry fails them with exit 3. If the review log cannot be written (the run's audit log no longer verifies,
 or the folder is read-only), the status line says so and the view is recorded in the next run's audit log instead.
 
+## Opening from RV Hub
+
+RV Hub opens the app with the case folder already filled: `rv-imgauth-gui.exe --case-dir <CASE> [FILES...]` (or
+`--case-dir=<CASE>`). The audit log then starts with `ui_case_dir_from_launcher` (the path and `at_utc`); a
+`--case-dir` without a folder is ignored, shown in the window and logged as `ui_launch_argument_ignored`.
+
 ## What the GUI records
 
 Before the run starts, the GUI writes every choice to the run's audit log, each with its time:
@@ -114,6 +120,7 @@ Before the run starts, the GUI writes every choice to the run's audit log, each 
 | Hash selection, report language, interface language | `ui_hash_selection_changed`, `ui_language_changed`, `ui_interface_language_changed` |
 | Custody form, timestamp, certificate | `ui_jurisdiction_changed`, `ui_timestamp_changed`, `ui_signing_certificate_changed` |
 | Options | `ui_maps_changed`, `ui_copy_move_changed`, `ui_ela_quality_changed`, `ui_max_pixels_changed`, `ui_references_changed`, `ui_worker_timeout_changed`, `ui_worker_memory_changed`, `ui_fingerprints_db_changed`, `ui_item_reports_changed` |
+| Opened by RV Hub with `--case-dir` | `ui_case_dir_from_launcher`, `ui_case_dir_changed` (or `ui_launch_argument_ignored`) |
 | Start | `ui_start_clicked` (final settings, all options) |
 | Cancel | `item_cancelled`, `run_cancelled` |
 | After the run: maps viewed | `ui_map_viewed` in the run's `review.jsonl` |
