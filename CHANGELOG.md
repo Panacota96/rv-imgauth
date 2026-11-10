@@ -5,6 +5,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.3.0](https://github.com/Panacota96/rv-imgauth/compare/v0.2.0...v0.3.0) (2026-11-10)
+
+
+### Features
+
+* **cli:** describe --json prints the tool's self-description for RV Hub ([32c84f8](https://github.com/Panacota96/rv-imgauth/commit/32c84f87e0f1d22bf10689bbb5c7a1237927a307))
+* **gui:** --case-dir DIR presets the case folder when RV Hub launches the app ([dd9f4ab](https://github.com/Panacota96/rv-imgauth/commit/dd9f4abeb863d9b737f620202758f0a1726891a0))
+
+
+### Bug Fixes
+
+* **packaging:** RV ImgAuth installer gets its own AppId ([658d355](https://github.com/Panacota96/rv-imgauth/commit/658d355f587f851f28dc354b5a3f61686f562cc9))
+* **trust:** drive timestamp checks from the audit log; RFC 3161/5280 TSA path rules ([e54044b](https://github.com/Panacota96/rv-imgauth/commit/e54044bc0add7748daafad633525c01852a0aa00))
+* **trust:** drive timestamp checks from the audit log; RFC 3161/5280 TSA path rules ([8f94795](https://github.com/Panacota96/rv-imgauth/commit/8f947957a865de6c1213cb3886c9c119e89e4d7a))
+
 ## [0.2.0](https://github.com/Panacota96/rv-imgauth/compare/v0.1.0...v0.2.0) (2026-10-28)
 
 
