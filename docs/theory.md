@@ -763,9 +763,21 @@ entry naming the run. The GUI writes one `ui_map_viewed` entry per (item, map, m
 kind, mode, opacity, whether the original was shown and the map's audited digest.
 
 RFC 3161: the imprint is the chain head itself (32 bytes as a SHA-256 value), with a nonce and `certReq`.
-`verify-log` checks the token digest, status, imprint, the TSA's CMS signature (ESS signing-certificate binding,
-message digest, RSA, timeStamping EKU), and with `--tsa-ca` the chain; not revocation, policy OID or accuracy
-(G18). Signed PDF reports use CMS `adbe.pkcs7.detached`, SHA-256, RSA, with the examiner's `.p12`; not PAdES, no
+`verify-log` and `verify-case` check every token the audit log records (`timestamp_obtained`; a recorded token
+whose `.tsr` or `.json` is missing, or whose metadata disagrees with the entry, is a problem — deleting the metadata
+file does not skip the checks) and any token file no entry records: the token digest, status, imprint, the TSA's CMS
+signature (ESS signing-certificate binding, message digest, RSA, an EKU that is critical and only
+`id-kp-timeStamping`, RFC 3161 §2.3), and with `--tsa-ca` the certificate path. Path building tries every candidate
+issuer and anchor (cross-signed intermediates, renewed anchors, self-issued key-rollover intermediates; at most 8
+deep, no loops); a path is accepted only if (an RFC 5280 subset, `trust::check_path`) every RSA signature verifies
+and every certificate is valid at `genTime`; every intermediate has `cA=TRUE` (an anchor too, or is v1 / has
+keyCertSign); an issuer with keyUsage has `keyCertSign`; no `pathLenConstraint` is exceeded (self-issued
+certificates not counted); directoryName name constraints hold (other name forms are not evaluated: a path carrying
+such names under such a constraint is rejected); and no certificate has an unsupported critical extension (policy
+processing is not implemented: critical policyConstraints, policyMappings and inhibitAnyPolicy fail closed). 34
+fixture chains (`tests/fixtures/tsa-chains`) pin these rules, each cross-checked with
+`openssl verify -purpose timestampsign`. Not checked: revocation (never; establish it from CRL/OCSP evidence
+covering `genTime`), policy OID, accuracy (G18). Signed PDF reports use CMS `adbe.pkcs7.detached`, SHA-256, RSA, with the examiner's `.p12`; not PAdES, no
 signature timestamp.
 
 ## B21 Determinism and reproducibility

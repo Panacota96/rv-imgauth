@@ -374,7 +374,7 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 | G13 | Personal data: outputs reproduce evidence pixels and every tag (incl. GPS); no encryption at rest or retention tooling | CO-D3, EU-D2 | Encrypted case volume; `--maps none` when maps are not needed | Retention and secure-deletion tooling; option to omit the preview | Firm + Eng. |
 | G14 | CPP renumbering on 1 Jan. 2029 | FR section | Cite with the version date | Concordance table | Counsel |
 | G17 | Source access without a defined protocol; LICENSE is a draft pending legal review | CO-P13, FR-P7 | Provide the tagged source on request | NDA / inspection protocol | Firm + Counsel |
-| G18 | `verify-log` does not check TSA revocation, policy OID or accuracy | EU-2 | `openssl ts -verify` as a second tool | Revocation and policy checks | Eng. |
+| G18 | `verify-log` does not check TSA revocation, policy OID or accuracy; certificate-policy processing and non-directoryName name constraints are not evaluated (such chains are rejected) | EU-2 | `openssl ts -verify` as a second signature/chain check; revocation established separately from CRL/OCSP evidence covering genTime (`openssl verify -crl_check` with that CRL, or rv-certcheck `--crl`/`--ocsp`) | Revocation and policy checks | Eng. |
 | G19 | No command re-verifies report and map files against the audited digests (the GUI viewer re-checks the maps it shows) | ISO-1 | Script in [usage.md](usage.md#8-verifying-a-run) | `verify-run` command | Eng. |
 | G22 | Release binaries not bit-for-bit reproducible | ISO-3 | Provenance attestation + functional equivalence | Path remapping, deterministic packaging | Eng. |
 | G23 | Windows: no OS-level network block for the worker | CO-D1 | Offline workstation or firewall rule | AppContainer / WFP | Eng. |
@@ -400,7 +400,9 @@ second-read re-hash, G20, is implemented here too: F2).
 6. **Workstation clock** synchronised; time source noted.
 7. **The run is complete** (`run_finished`) and `rv-imgauth verify-log <log folder>` prints OK, including the review
    entries; `python tests/verify_chain.py <log folder>` exits 0.
-8. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify`).
+8. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify` as a signature/chain check), and
+   the TSA certificate's revocation status at genTime established separately from CRL/OCSP evidence covering
+   genTime, kept with the case.
 9. **No `PARSER_FAILED`, `ANALYSIS_SKIPPED_SIZE_CAP`, `COEFFICIENTS_UNAVAILABLE` or `PIXELS_NOT_DECODED` left
    unexplained**; HEIC items are declared as structure-only.
 10. **Every map relied on was examined by the examiner** in the viewer (recorded in `review.jsonl`) and is described
