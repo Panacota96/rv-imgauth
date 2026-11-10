@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.3.1](https://github.com/Panacota96/rv-imgauth/compare/v0.3.0...v0.3.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **security:** patch dependency advisories, blind RSA signing, check advisories in CI ([039aac8](https://github.com/Panacota96/rv-imgauth/commit/039aac87eaf1b49519dfa67f03c3208107739492))
+* **security:** patch dependency advisories, blind RSA signing, check advisories in CI ([019a1f1](https://github.com/Panacota96/rv-imgauth/commit/019a1f107a26fc89519d008e536349210611975d))
+
 ## [0.3.0](https://github.com/Panacota96/rv-imgauth/compare/v0.2.0...v0.3.0) (2026-11-10)
 
 
