@@ -199,8 +199,10 @@ head just before the statistics report is written.
 rv-imgauth verify-log <OUT>\logs\<RUN-ID> --tsa-ca C:\certs\tsa-roots.pem
 ```
 
-Without `--tsa-ca` the output says *chain not validated*. Revocation, policy OID and accuracy are not checked by
-the tool; cross-check with OpenSSL:
+Without `--tsa-ca` the output says *chain not checked*. A token the log records whose `.tsr` or `.json` is missing
+fails the log (exit 3). Revocation, policy OID and accuracy are never checked by the tool. Cross-check the
+**signature and chain** with OpenSSL; it does not check revocation either (no CRL is supplied and OpenSSL does not
+query OCSP, so "Verification: OK" says nothing about revocation):
 
 ```bash
 cd <OUT>/logs/<RUN-ID>
@@ -211,6 +213,13 @@ openssl ts -reply -in timestamp-$N.tsr -token_out -out token.der
 openssl pkcs7 -inform DER -in token.der -print_certs > tsa-certs.pem
 openssl ts -verify -digest "$H" -in timestamp-$N.tsr -CAfile <TSA root.pem> -untrusted tsa-certs.pem
 ```
+
+Establish the TSA certificate's revocation status separately, from CRL/OCSP evidence that covers genTime (a CRL
+issued after genTime by the TSA's CA, or an OCSP response archived at stamping time), e.g.
+`openssl verify -crl_check -CRLfile tsa-ca.crl -CAfile <TSA root.pem> -untrusted tsa-certs.pem -attime <genTime-epoch> tsa.pem`,
+or `rv-certcheck analyze --crl … --ocsp …`.
+
+> **CRL dates and `-attime`.** OpenSSL applies `-attime` to the CRL as well, so `openssl verify -crl_check -attime <genTime-epoch>` only works with a CRL whose `thisUpdate`–`nextUpdate` interval contains genTime; a CRL issued after genTime fails with "CRL is not yet valid". To use a later CRL as evidence, check its signature (`openssl crl -in tsa-ca.crl -CAfile <TSA root.pem> -noout -verify`), then look up the TSA certificate's serial in it (`openssl crl -in tsa-ca.crl -noout -text`): absent, or listed with a revocation date after genTime, means not revoked at genTime. A CA may drop expired certificates from its CRLs, so for a TSA certificate that has since expired an absent serial is not conclusive: use a CRL from before its expiry, or an OCSP response archived at stamping time.
 
 The review log (`review.jsonl`) is written after the run and is **not** covered by the run's timestamp; its first
 entry is anchored to `run_finished`.
