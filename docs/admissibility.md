@@ -73,7 +73,7 @@ against them; only the free preview of ISO/IEC 27037 was read; ISO/IEC 27041/270
 | F20 | Review log: maps viewed after the run, hash-chained and anchored to `run_finished`; checked by `verify-log` and `verify-case` | [src/core/src/review.rs](../src/core/src/review.rs); `review.jsonl` |
 | F21 | Worker isolation: time and memory limits, no network code, pixel-size caps | [src/core/src/worker.rs](../src/core/src/worker.rs); `--worker-timeout`, `--worker-memory`, `--max-pixels` |
 | F22 | Reference comparison against known originals, "consistent / inconsistent with the reference set (n=…)" | `--reference`; [src/img/src/analysis/reference.rs](../src/img/src/analysis/reference.rs) |
-| F23 | Hashed derived files: `structure.json`, `metadata.json`, `maps/original.png`, every map | `output_written` in `audit.jsonl` |
+| F23 | Hashed derived files: `structure.json`, `metadata.json`, `maps/original.png`, every map; re-hashed by `verify-log` and `verify-case` | `output_written` in `audit.jsonl`; [src/core/src/outputs.rs](../src/core/src/outputs.rs) |
 
 ## 2. Evidence lifecycle and where each control sits
 
@@ -375,7 +375,7 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 | G14 | CPP renumbering on 1 Jan. 2029 | FR section | Cite with the version date | Concordance table | Counsel |
 | G17 | Source access without a defined protocol; LICENSE is a draft pending legal review | CO-P13, FR-P7 | Provide the tagged source on request | NDA / inspection protocol | Firm + Counsel |
 | G18 | `verify-log` does not check TSA revocation, policy OID or accuracy; certificate-policy processing and non-directoryName name constraints are not evaluated (such chains are rejected) | EU-2 | `openssl ts -verify` as a second signature/chain check; revocation established separately from CRL/OCSP evidence covering genTime (`openssl verify -crl_check` with that CRL, or rv-certcheck `--crl`/`--ocsp`) | Revocation and policy checks | Eng. |
-| G19 | No command re-verifies report and map files against the audited digests (the GUI viewer re-checks the maps it shows) | ISO-1 | Script in [usage.md](usage.md#8-verifying-a-run) | `verify-run` command | Eng. |
+| G19 | Re-verification of the run's outputs against the digests in the audit log — **closed**: `verify-log` and `verify-case` re-hash every file the audit log records (reports, maps and other derived files, `hashes.csv`, `environment.json`) with every recorded algorithm; an edited, deleted or replaced output, or a recorded path leading outside the run folder, is a problem (exit 3) named in the output ([src/core/src/outputs.rs](../src/core/src/outputs.rs)). Files the run never recorded are not checked; kept for numbering | — | — | — | — |
 | G22 | Release binaries not bit-for-bit reproducible | ISO-3 | Provenance attestation + functional equivalence | Path remapping, deterministic packaging | Eng. |
 | G23 | Windows: no OS-level network block for the worker | CO-D1 | Offline workstation or firewall rule | AppContainer / WFP | Eng. |
 | G-IMG1 | **Fingerprint starter DB is empty** (`rakvor-starter` version 0, 0 entries): every JPEG gives `QT_UNKNOWN` unless the local DB was taught | CO-L4, US-8 | Learn known originals per case (`fingerprints learn`) and disclose the DB (`fingerprints export`) | Seed the starter DB from Rakvor's own captures | Eng. |
@@ -399,7 +399,8 @@ second-read re-hash, G20, is implemented here too: F2).
 5. **Hash policy**: one of the algorithms is sha256 or sha512.
 6. **Workstation clock** synchronised; time source noted.
 7. **The run is complete** (`run_finished`) and `rv-imgauth verify-log <log folder>` prints OK, including the review
-   entries; `python tests/verify_chain.py <log folder>` exits 0.
+   entries and `outputs: N verified of N recorded` (every report and map re-hashed against the audited digests);
+   `python tests/verify_chain.py <log folder>` exits 0.
 8. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify` as a signature/chain check), and
    the TSA certificate's revocation status at genTime established separately from CRL/OCSP evidence covering
    genTime, kept with the case.

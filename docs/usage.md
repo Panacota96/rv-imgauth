@@ -242,17 +242,36 @@ Remove-Item Env:RV_SIGN_PASSWORD
 
 | Step | Command | Proves |
 | --- | --- | --- |
-| 1 | `rv-imgauth verify-log <log> [--tsa-ca <bundle>]` | No audit entry edited, deleted or reordered; timestamp tokens valid; `review.jsonl` intact and anchored to this run ("review entries: N") |
-| 2 | `rv-imgauth verify-case <CASE>` (case folder) | Case log, registry and every run (and its review log) intact |
+| 1 | `rv-imgauth verify-log <log> [--tsa-ca <bundle>]` (exit 0 intact, 3 broken or an output changed) | No audit entry edited, deleted or reordered; timestamp tokens valid; `review.jsonl` intact and anchored to this run ("review entries: N"); every recorded output still has its digest (`outputs:` line) |
+| 2 | `rv-imgauth verify-case <CASE>` (case folder) | Case log, registry and every run (and its review log) intact, with every recorded output unchanged |
 | 3 | `python tests/verify_chain.py <log>` (source tree) | Same chain rule, independent implementation; re-hashes the evidence in `hashes.csv` |
 | 4 | OpenSSL ([§6](#6-timestamps)) | The TSA signed that head at that time |
-| 5 | Script below | Every report, map and JSON output still has its audited digest |
+| 5 | Step 1 (`outputs:` line); script below for an independent check | Every report, map and JSON output still has its audited digest |
 
 ```text
-OK  209 entries, chain intact: …/logs/20261028T155038Z-ccbb83/audit.jsonl
+OK  210 entries, chain intact: …/logs/20261113T230819Z-01615d/audit.jsonl
+    timestamp 2026-11-13T23:12:44Z by http://timestamp.digicert.com covers entry #207: TSA signature valid (…)
+    outputs: 422 verified of 423 recorded (md5, sha256), 1 skipped
+    not re-hashed: logs/timestamp-00207.tsr (RFC 3161 token: checked by the timestamp verification)
 ```
 
-Step 5 (no built-in command yet, gap G19; needs `sha256` among the run's algorithms):
+The `outputs:` line is the re-hash of every file the log says the run wrote (item reports, statistics, maps, `original.png`, `structure.json`, `metadata.json`, `hashes.csv`,
+`environment.json`), with every algorithm the log recorded; the latest entry for a file wins. A file edited, deleted
+or replaced after the run makes the run `BROKEN` (exit 3) and is named:
+
+```text
+BROKEN  …/logs/20261113T230819Z-01615d/audit.jsonl
+  - output reports/items/00004-edited-gimp.jpg/maps/ela.png: md5 differs from audit entry #38 (recorded fa1c…, now ca78…): edited or replaced after the run
+  - output reports/statistics.en.pdf: missing (recorded by audit entry #209): deleted or moved after the run
+    outputs: 420 verified of 423 recorded (md5, sha256), 1 missing, 1 changed, 1 skipped
+```
+
+A recorded path that is absolute, contains `..`, or resolves outside the run folder through a symlink or junction is
+rejected and never read. The timestamp token is listed as `not re-hashed` because the timestamp check already
+verifies it. Files the run did not record (anything added to the folder later) are not checked.
+
+Step 5 is built into `verify-log` and `verify-case`. To check it with code you can read in one screen (an
+independent implementation, e.g. for an opposing expert), re-hash every file the run recorded (needs `sha256` among the run's algorithms):
 
 ```bash
 python - "<OUT>/logs/<RUN-ID>" "<OUT>/reports/<RUN-ID>" <<'EOF'
