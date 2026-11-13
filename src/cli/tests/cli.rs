@@ -202,6 +202,48 @@ fn bulk_scan_writes_reports_logs_and_verifiable_chain() {
         .code(0)
         .stdout(predicate::str::contains("chain intact"));
 
+    // Every output the log records is re-hashed: an edited report or a deleted one is a problem (exit 3).
+    // The analysis outputs (output_written with `hashes`) are checked in tests/analyze.rs.
+    let ok = bin().arg("verify-log").arg(&logs).assert().code(0);
+    let text = String::from_utf8_lossy(&ok.get_output().stdout).into_owned();
+    let line = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("outputs: "))
+        .expect("outputs line");
+    let (verified, rest) = line.split_once(" verified of ").unwrap();
+    assert_eq!(
+        rest,
+        format!("{} recorded (blake3, sha256)", verified),
+        "every recorded output verified, none skipped"
+    );
+    assert!(verified.parse::<usize>().unwrap() > 7 * 3, "{}", line);
+    let item = std::fs::read_dir(reports.join("items"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .into_owned();
+    let technical = reports.join("items").join(&item).join("technical.json");
+    let saved = std::fs::read(&technical).unwrap();
+    std::fs::write(&technical, b"{\"edited\": true}\n").unwrap();
+    let stats = reports.join("statistics.json");
+    std::fs::rename(&stats, out.path().join("moved.json")).unwrap();
+    bin().arg("verify-log").arg(&logs).assert().code(3).stdout(
+        predicate::str::contains(format!(
+            "output reports/items/{}/technical.json: blake3 differs from audit entry #",
+            item
+        ))
+        .and(predicate::str::contains(
+            "output reports/statistics.json: missing",
+        ))
+        .and(predicate::str::contains("1 missing, 1 changed")),
+    );
+    std::fs::write(&technical, saved).unwrap();
+    std::fs::rename(out.path().join("moved.json"), &stats).unwrap();
+    bin().arg("verify-log").arg(&logs).assert().code(0);
+
     // Tampering with one entry is detected.
     let p = logs.join("audit.jsonl");
     let text = std::fs::read_to_string(&p).unwrap();
@@ -700,14 +742,24 @@ fn case_folder_analysis_verify_case_and_tampering() {
     let item = only_dir(&run_dir.join("reports/items"));
     let custody = std::fs::read_to_string(item.join("custody.fr.html")).unwrap();
     assert!(custody.contains("E000") && custody.contains("CASE-1"));
+    bin().arg("verify-case").arg(&case).assert().code(0).stdout(
+        predicate::str::contains("2 registered items, 2 runs verified").and(
+            predicate::str::is_match(r"outputs: [1-9]\d* verified of [1-9]\d* recorded").unwrap(),
+        ),
+    );
+    // verify-case re-hashes every run's recorded outputs: an edited report is named, exit 3.
+    let stats = run_dir.join("reports/statistics.json");
+    let saved = std::fs::read(&stats).unwrap();
+    std::fs::write(&stats, b"{}\n").unwrap();
     bin()
         .arg("verify-case")
         .arg(&case)
         .assert()
-        .code(0)
+        .code(3)
         .stdout(predicate::str::contains(
-            "2 registered items, 2 runs verified",
+            "output reports/statistics.json: md5 differs from audit entry #",
         ));
+    std::fs::write(&stats, saved).unwrap();
     // Viewing after the run goes to the run's review log; verify-case checks it and counts it, and a review
     // log copied from another run (wrong anchor) breaks the case.
     let logs = run_dir.join("logs");
