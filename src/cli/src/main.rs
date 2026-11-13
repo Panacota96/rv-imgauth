@@ -5,6 +5,7 @@ mod fingerprints;
 
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+use rv_imgauth_core::outputs::OutputsCheck;
 use rv_imgauth_core::trust::{self, DEFAULT_TSA};
 use rv_imgauth_core::{
     CASE_ROLE, Event, HashAlgo, RunConfig, TOOL_NAME, TOOL_VERSION, audit, case, hash, i18n, run,
@@ -241,12 +242,23 @@ REVIEW LOG:
   checked when present: an intact hash chain whose first entry links to the run's run_finished
   entry, every entry naming this run. The output adds \"review entries: N\".
 
+RECORDED OUTPUTS:
+  Every file the log says the run wrote (item reports, statistics, analysis outputs such as
+  extracted revisions and maps, hashes.csv, environment.json) is re-hashed with each algorithm
+  recorded and compared; the latest entry for a file wins. A missing, edited or replaced file is
+  a problem; a recorded path that is absolute, contains .. or resolves outside the run folder
+  (symlink, junction) is rejected and not read. Timestamp tokens (checked above) are listed as
+  not re-hashed, with the reason. Output: \"outputs: N verified of M recorded (algorithms)\".
+
 EXIT CODES:
-  0  The chain is intact and every timestamp token verifies.
+  0  The chain is intact, every timestamp token verifies, and every output file it records
+     (reports, analysis outputs, hashes.csv, environment.json) still has the recorded digests.
   1  The log or the --tsa-ca file cannot be read.
   3  The chain is broken (an entry was edited, deleted or re-ordered), a timestamp token does not
-     verify (altered token, invalid TSA signature, chain not trusted by --tsa-ca), or review.jsonl
-     is broken or anchored to another run.")]
+     verify (altered token, invalid TSA signature, chain not trusted by --tsa-ca), review.jsonl
+     is broken or anchored to another run, or a recorded output file was edited, deleted or
+     replaced after the run (named in the output; a recorded path that leads outside the run
+     folder is rejected, not read).")]
     VerifyLog {
         /// Path to audit.jsonl, or to the run's log folder that contains it.
         ///
@@ -303,7 +315,10 @@ CHECKS:
     valid timestamp tokens), its case_linked entry points to its run_started entry, and the
     audit head recorded at run_finished is its final entry (only timestamp_obtained may follow);
   - a run's review.jsonl (viewing after the run), when present, is an intact chain anchored to
-    that run's run_finished entry (\"review entries: N\").
+    that run's run_finished entry (\"review entries: N\");
+  - every output file a run's audit log records (reports, analysis outputs, hashes.csv,
+    environment.json) is re-hashed and compared with the recorded digests (edited, deleted or
+    replaced: a problem).
 
 EXAMPLES:
   rv-imgauth verify-case E:\\CASE-014
@@ -311,7 +326,8 @@ EXAMPLES:
 EXIT CODES:
   0  The case folder is intact (warnings, e.g. a run still in progress, are printed).
   1  The folder is not a case folder (no case.json).
-  3  At least one check failed: the case was edited, truncated or re-ordered.")]
+  3  At least one check failed: the case was edited, truncated or re-ordered, or a run's
+     recorded output (report, register) was edited, deleted or replaced.")]
     VerifyCase {
         /// The case folder (the one that holds case.json).
         ///
@@ -1153,6 +1169,7 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
     let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let mut tokens = Vec::new();
     let mut review = None;
+    let mut outputs = None;
     let checked = audit::verify(&path).and_then(|n| {
         let v = trust::verify_timestamps_with(&path, anchors.as_deref());
         tokens = v.tokens;
@@ -1162,6 +1179,10 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             Ok(r) => review = r,
             Err(p) => problems.extend(p.into_iter().map(|x| format!("review.jsonl: {x}"))),
         }
+        // Every output file the log records is re-hashed: an edited, deleted or replaced one is a problem.
+        let o = rv_imgauth_core::outputs::verify_recorded_outputs(&dir, &read_entries(&path));
+        problems.extend(o.problems.iter().map(ToString::to_string));
+        outputs = Some(o);
         if problems.is_empty() {
             Ok(n)
         } else {
@@ -1177,6 +1198,7 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             if let Some(r) = review {
                 println!("    review entries: {r} (review.jsonl, anchored to run_finished)");
             }
+            print_outputs(outputs.as_ref());
             EXIT_OK
         }
         Err(problems) if problems.len() == 1 && problems[0].starts_with("cannot open") => {
@@ -1188,7 +1210,28 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             for p in problems {
                 println!("  - {}", p);
             }
+            print_outputs(outputs.as_ref());
             EXIT_FINDINGS
+        }
+    }
+}
+
+/// The entries of an audit log (one JSON object per line; unreadable lines are left to the chain check).
+fn read_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
+/// `outputs: N verified of M recorded (…)` and the files not re-hashed, with the reason.
+fn print_outputs(outputs: Option<&OutputsCheck>) {
+    if let Some(o) = outputs {
+        println!("    {}", o.summary());
+        for s in o.skipped_lines() {
+            println!("    {}", s);
         }
     }
 }
@@ -1212,6 +1255,10 @@ fn verify_case(dir: PathBuf) -> u8 {
             v.runs,
             dir.display()
         );
+        println!(
+            "    outputs: {} verified of {} recorded by the runs' audit logs",
+            v.outputs_verified, v.outputs_recorded
+        );
         if v.review_entries > 0 {
             println!("    review entries: {}", v.review_entries);
         }
@@ -1224,6 +1271,10 @@ fn verify_case(dir: PathBuf) -> u8 {
         for p in &v.problems {
             println!("  - {}", p);
         }
+        println!(
+            "    outputs: {} verified of {} recorded by the runs' audit logs",
+            v.outputs_verified, v.outputs_recorded
+        );
         for w in &v.warnings {
             println!("  warning: {}", w);
         }
