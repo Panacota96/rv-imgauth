@@ -5,6 +5,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.3.2](https://github.com/Panacota96/rv-imgauth/compare/v0.3.1...v0.3.2) (2026-11-14)
+
+
+### Bug Fixes
+
+* **cli:** verify-log re-hashes the outputs the log records ([037718a](https://github.com/Panacota96/rv-imgauth/commit/037718a9d3a271289069b21ab9200d66745eb8e1))
+* **core:** late audit entries and redirected run folders cannot hide an edited output ([1d52218](https://github.com/Panacota96/rv-imgauth/commit/1d52218c986d3e803053a3689f526cdd8b46d590))
+* **core:** re-hash recorded outputs in verify-case ([dd363e9](https://github.com/Panacota96/rv-imgauth/commit/dd363e9b727c99b7d9188bb3441a01241e5772af))
+* verify-log and verify-case re-hash the outputs the audit log records ([652df12](https://github.com/Panacota96/rv-imgauth/commit/652df12ff1f6230ec9c099c1af1dc05bc5550695))
+
 ## [0.3.1](https://github.com/Panacota96/rv-imgauth/compare/v0.3.0...v0.3.1) (2026-11-10)
 
 
