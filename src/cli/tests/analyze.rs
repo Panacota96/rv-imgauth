@@ -380,6 +380,39 @@ fn domain_options_reach_the_analysis_and_flagged_skips_ok_items() {
         })
         .unwrap();
     assert_eq!(preview["details"]["kind"], "original_preview");
+    // verify-log re-hashes every one of them (none skipped): a map edited after the run is named, exit 3.
+    let ok = bin(d.path()).arg("verify-log").arg(&logs).assert().code(0);
+    let text = String::from_utf8_lossy(&ok.get_output().stdout).into_owned();
+    let line = text
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("outputs: "))
+        .expect("outputs line");
+    let (verified, rest) = line.split_once(" verified of ").unwrap();
+    assert!(
+        rest.starts_with(&format!("{} recorded (", verified)) && !rest.contains("skipped"),
+        "{}",
+        line
+    );
+    assert!(
+        verified.parse::<usize>().unwrap() >= written.len(),
+        "{}",
+        line
+    );
+    let map_file = preview["details"]["file"].as_str().unwrap();
+    let map = gimp.join("maps/original.png");
+    let saved = std::fs::read(&map).unwrap();
+    std::fs::write(&map, b"edited").unwrap();
+    bin(d.path())
+        .arg("verify-log")
+        .arg(&logs)
+        .assert()
+        .code(3)
+        .stdout(
+            predicate::str::contains(format!("output reports/{map_file}: "))
+                .and(predicate::str::contains("differs from audit entry #"))
+                .and(predicate::str::contains("1 changed")),
+        );
+    std::fs::write(&map, saved).unwrap();
     bin(d.path()).arg("verify-log").arg(&logs).assert().code(0);
 
     // --maps none: an empty selection; the preview and the thumbnail comparison are still written.

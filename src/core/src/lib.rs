@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod imgscan;
 pub mod input;
 pub mod intake;
+pub mod outputs;
 pub mod report;
 pub mod review;
 pub mod run;

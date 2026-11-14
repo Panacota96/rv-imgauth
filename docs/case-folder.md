@@ -199,14 +199,16 @@ flowchart TB
     E -- no --> X
     E -- yes --> F{"case_linked → run_started<br/>and run_finished → final audit entry?"}
     F -- no --> X
-    F -- yes --> G{"review.jsonl (if any)<br/>intact, anchored to run_finished?"}
+    F -- yes --> R{"every output the run's<br/>audit.jsonl records unchanged?"}
+    R -- no --> X
+    R -- yes --> G{"review.jsonl (if any)<br/>intact, anchored to run_finished?"}
     G -- no --> X
     G -- yes --> OK["OK (exit 0)<br/>warnings: runs without run_finished"]
 ```
 
 1. `rv-imgauth verify-case <CASE>` (rv-hashinv has the same command; they agree on the case log and the runs).
    Exit 0 = intact, 3 = broken, 1 = not a case folder. Only `timestamp_obtained` may follow a run's recorded final
-   entry (a delayed timestamp). Viewing after the run is never appended to the run's audit log: it goes to the run's
+   entry (a delayed timestamp). Every output file a run's audit log records (reports, `hashes.csv`, `environment.json`, maps) is re-hashed: an edited, deleted or replaced output is exit 3, named as `run <RUN-ID>: output reports/…`. Viewing after the run is never appended to the run's audit log: it goes to the run's
    `review.jsonl`, which `verify-case` checks when present ("review entries: N").
 2. Independently of any Rakvor binary: `python tests/verify_chain.py <CASE>/runs/<tool>/<RUN-ID>/logs` re-checks a
    run; the case log uses the same chain rule, and `sha256sum evidence/registry.json` must equal the last
