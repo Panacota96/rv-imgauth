@@ -400,7 +400,7 @@ second-read re-hash, G20, is implemented here too: F2).
 6. **Workstation clock** synchronised; time source noted.
 7. **The run is complete** (`run_finished`) and `rv-imgauth verify-log <log folder>` prints OK, including the review
    entries and `outputs: N verified of N recorded` (every report and map re-hashed against the audited digests);
-   `python tests/verify_chain.py <log folder>` exits 0.
+   `python tests/verify_chain.py <log folder>` exits 0 (it also re-hashes every output the audit log records).
 8. **Timestamp** obtained and checked (`verify-log --tsa-ca`, `openssl ts -verify` as a signature/chain check), and
    the TSA certificate's revocation status at genTime established separately from CRL/OCSP evidence covering
    genTime, kept with the case.

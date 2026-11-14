@@ -244,7 +244,7 @@ Remove-Item Env:RV_SIGN_PASSWORD
 | --- | --- | --- |
 | 1 | `rv-imgauth verify-log <log> [--tsa-ca <bundle>]` (exit 0 intact, 3 broken or an output changed) | No audit entry edited, deleted or reordered; timestamp tokens valid; `review.jsonl` intact and anchored to this run ("review entries: N"); every recorded output still has its digest (`outputs:` line) |
 | 2 | `rv-imgauth verify-case <CASE>` (case folder) | Case log, registry and every run (and its review log) intact, with every recorded output unchanged |
-| 3 | `python tests/verify_chain.py <log>` (source tree) | Same chain rule, independent implementation; re-hashes the evidence in `hashes.csv` |
+| 3 | `python tests/verify_chain.py <log>` (source tree) | Same chain rule, independent implementation; re-hashes the evidence in `hashes.csv` and every output the audit log records |
 | 4 | OpenSSL ([§6](#6-timestamps)) | The TSA signed that head at that time |
 | 5 | Step 1 (`outputs:` line); script below for an independent check | Every report, map and JSON output still has its audited digest |
 
