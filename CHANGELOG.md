@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.3.3](https://github.com/Panacota96/rv-imgauth/compare/v0.3.2...v0.3.3) (2026-11-19)
+
+
+### Bug Fixes
+
+* **deps:** drop the unmaintained chrono dependency (RUSTSEC-2026-0543); every date written or read is golden-tested byte-identical ([b5e6760](https://github.com/Panacota96/rv-imgauth/commit/b5e67607d5d0b8ac2ed888867db60cd2302d4701))
+
 ## [0.3.2](https://github.com/Panacota96/rv-imgauth/compare/v0.3.1...v0.3.2) (2026-11-14)
 
 
