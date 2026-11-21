@@ -4,6 +4,8 @@
 use eframe::egui;
 
 fn main() -> eframe::Result {
+    // The start-up release check (notify only; RV_NO_UPDATE_CHECK=1 turns it off).
+    rv_imgauth_core::update::start_gui_check();
     // Worker child (image analysis in an isolated process): dispatched before eframe starts.
     if std::env::args_os().nth(1).is_some_and(|a| a == "worker") {
         std::process::exit(rv_imgauth_core::worker::worker_main());
