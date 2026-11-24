@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.4.1](https://github.com/Panacota96/rv-imgauth/compare/v0.4.0...v0.4.1) (2026-11-24)
+
+
+### Performance Improvements
+
+* **verify:** stream the audit log instead of holding every entry ([#28](https://github.com/Panacota96/rv-imgauth/issues/28)) ([9004b4f](https://github.com/Panacota96/rv-imgauth/commit/9004b4f468236acc09ba3e476d27d8ec488685f1))
+
 ## [0.4.0](https://github.com/Panacota96/rv-imgauth/compare/v0.3.3...v0.4.0) (2026-11-21)
 
 
