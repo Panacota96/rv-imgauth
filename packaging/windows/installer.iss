@@ -42,6 +42,7 @@ Source: "{#SourceDir}\target\release\rv-imgauth.exe"; DestDir: "{app}"; Flags: i
 Source: "{#SourceDir}\target\release\rv-imgauth-gui.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\README.md"; DestDir: "{app}"
 Source: "{#SourceDir}\LICENSE"; DestDir: "{app}"
+Source: "{#SourceDir}\COMMERCIAL.md"; DestDir: "{app}"
 Source: "{#SourceDir}\NOTICE"; DestDir: "{app}"
 Source: "{#SourceDir}\CHANGELOG.md"; DestDir: "{app}"
 Source: "{#SourceDir}\docs\*"; DestDir: "{app}\docs"; Flags: recursesubdirs

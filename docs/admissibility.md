@@ -23,8 +23,12 @@
 
 ## 1. Purpose and how to read this page
 
-RV ImgAuth is used **locally** by Rakvor; it is not distributed. Clients, courts and opposing experts may audit
-its source ([LICENSE](../LICENSE)). Its results are **signals for an examiner, never a verdict**
+RV ImgAuth is source-available under the PolyForm Noncommercial License 1.0.0 ([LICENSE](../LICENSE)): anyone,
+including a court, an opposing party or its expert, may inspect, build and run the exact version named in a
+report for non-commercial purposes. Commercial use needs a licence from Rakvor ([COMMERCIAL.md](../COMMERCIAL.md)).
+Rakvor's licensing texts are drafts pending legal review; whether a given use (for example a paid expert's
+review) counts as non-commercial is to be verified by counsel.
+Its results are **signals for an examiner, never a verdict**
 ([theory.md](theory.md#a1-what-the-tool-is-and-is-not)). Admissibility and weight are decided by a court about the
 **examiner's evidence**, of which the tool's output is one part.
 
@@ -67,7 +71,7 @@ against them; only the free preview of ISO/IEC 27037 was read; ISO/IEC 27041/270
 | F14 | CI on Windows and Linux | [.github/workflows/ci.yml](../.github/workflows/ci.yml) |
 | F15 | SBOM and build provenance | [.github/workflows/release.yml](../.github/workflows/release.yml) |
 | F16 | Versioned releases with `SHA256SUMS`, signed with the internal Rakvor certificate | [installation.md](installation.md) |
-| F17 | Source auditable by customers and opposing experts; local use only | [LICENSE](../LICENSE) |
+| F17 | Source available to anyone, including courts and opposing experts, to inspect, build and run for non-commercial purposes (PolyForm Noncommercial 1.0.0) | [LICENSE](../LICENSE); [COMMERCIAL.md](../COMMERCIAL.md) (draft, to be verified by counsel); [NOTICE](../NOTICE) |
 | F18 | One-step intake by RV HashInv (`--intake hashinv`); case-folder verification (`--case-dir`, `verify-case`) | [case-folder.md](case-folder.md) |
 | F19 | Every analysis parameter recorded with its output (quality, gain, encoder and version, block sizes, thresholds) | `technical.json` → `image.maps[].params`, `image.options` |
 | F20 | Review log: maps viewed after the run, hash-chained and anchored to `run_finished`; checked by `verify-log` and `verify-case` | [src/core/src/review.rs](../src/core/src/review.rs); `review.jsonl` |
@@ -131,7 +135,7 @@ specifically on ELA, quantization tables or copy-move was found [to verify; nega
 | --- | --- | --- |
 | **Testability** | Deterministic outputs ([theory.md B21](theory.md#b21-determinism-and-reproducibility)); 15 synthetic samples with exact expected findings (F11); oracles (F12); fuzzing (F13); every parameter recorded (F19) | met |
 | **Known or potential error rate** | Thresholds and their synthetic calibration published ([theory.md](theory.md#part-b--for-examiners-and-opposing-experts)); published rates of the underlying papers quoted as such. **No error rates measured for this implementation on a documented corpus** (G5); stated in every report (F9) | gap |
-| **Peer review / independent checks** | Methods from peer-reviewed literature (Popescu & Farid; Lin et al.; Farid; Mahdian & Saic; Fridrich et al.); source auditable (F17); independent oracles for tables, metadata and maps (F12). No external review of this implementation (G7) | partial |
+| **Peer review / independent checks** | Methods from peer-reviewed literature (Popescu & Farid; Lin et al.; Farid; Mahdian & Saic; Fridrich et al.); source available for review (F17); independent oracles for tables, metadata and maps (F12). No external review of this implementation (G7) | partial |
 | **Standards controlling the operation** | SWGDE 18-I-001 wording rules built into the findings (F8, F9); fixed parameters (F19); release verification ([installation.md](installation.md)); examiner checklist below | partial |
 | **General acceptance** | Metadata, structure and quantization-table analysis are standard practice; ELA is contested in the literature (Krawetz himself: it "only identifies 'a' change") — hence maps are info-only with fixed wording | partial |
 | **Validation for intended use** (ISO/IEC 27041; ISO/IEC 17025 §7.2.2 [V]) | Inputs exist (F10–F14) but no per-release validation report (G6) | gap |
@@ -373,7 +377,7 @@ Owners: **Eng.** = engineering, **Counsel**, **Examiner**, **Firm** = Rakvor man
 | G12 | Host clock; only the chain head is stamped | CO-J4 | Check time sync before the run | Record clock source and offset | Eng. |
 | G13 | Personal data: outputs reproduce evidence pixels and every tag (incl. GPS); no encryption at rest or retention tooling | CO-D3, EU-D2 | Encrypted case volume; `--maps none` when maps are not needed | Retention and secure-deletion tooling; option to omit the preview | Firm + Eng. |
 | G14 | CPP renumbering on 1 Jan. 2029 | FR section | Cite with the version date | Concordance table | Counsel |
-| G17 | Source access without a defined protocol; LICENSE is a draft pending legal review | CO-P13, FR-P7 | Provide the tagged source on request | NDA / inspection protocol | Firm + Counsel |
+| G17 | Source access without a defined protocol; the licence wording (PolyForm Noncommercial 1.0.0 with Rakvor's Required Notice, and COMMERCIAL.md) is a draft pending legal review | CO-P13, FR-P7 | Provide the tagged source on request | NDA / inspection protocol | Firm + Counsel |
 | G18 | `verify-log` does not check TSA revocation, policy OID or accuracy; certificate-policy processing and non-directoryName name constraints are not evaluated (such chains are rejected) | EU-2 | `openssl ts -verify` as a second signature/chain check; revocation established separately from CRL/OCSP evidence covering genTime (`openssl verify -crl_check` with that CRL, or rv-certcheck `--crl`/`--ocsp`) | Revocation and policy checks | Eng. |
 | G19 | Re-verification of the run's outputs against the digests in the audit log — **closed**: `verify-log` and `verify-case` re-hash every file the audit log records (reports, maps and other derived files, `hashes.csv`, `environment.json`) with every recorded algorithm; an edited, deleted or replaced output, or a recorded path leading outside the run folder, is a problem (exit 3) named in the output ([src/core/src/outputs.rs](../src/core/src/outputs.rs)). Files the run never recorded are not checked; kept for numbering | — | — | — | — |
 | G22 | Release binaries not bit-for-bit reproducible | ISO-3 | Provenance attestation + functional equivalence | Path remapping, deterministic packaging | Eng. |
