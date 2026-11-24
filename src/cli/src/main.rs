@@ -1209,7 +1209,9 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             Err(p) => problems.extend(p.into_iter().map(|x| format!("review.jsonl: {x}"))),
         }
         // Every output file the log records is re-hashed: an edited, deleted or replaced one is a problem.
-        let o = rv_imgauth_core::outputs::verify_recorded_outputs(&dir, &read_entries(&path));
+        let o = rv_imgauth_core::outputs::scan_audit(&path, &[])
+            .index
+            .verify(&rv_imgauth_core::outputs::RunLayout::of_log_dir(&dir));
         problems.extend(o.problems.iter().map(ToString::to_string));
         outputs = Some(o);
         if problems.is_empty() {
@@ -1243,16 +1245,6 @@ fn verify_log(log: PathBuf, tsa_ca: Option<PathBuf>) -> u8 {
             EXIT_FINDINGS
         }
     }
-}
-
-/// The entries of an audit log (one JSON object per line; unreadable lines are left to the chain check).
-fn read_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
 }
 
 /// `outputs: N verified of M recorded (…)` and the files not re-hashed, with the reason.
