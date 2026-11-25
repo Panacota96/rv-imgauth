@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are generated from
 [Conventional Commits](https://www.conventionalcommits.org/) by release-please and reviewed by a human.
 
+## [0.4.2](https://github.com/Panacota96/rv-imgauth/compare/v0.4.1...v0.4.2) (2026-11-25)
+
+
+### Bug Fixes
+
+* **trust:** accept leap seconds only at 23:59:60; test imprint and nonce bounds ([#33](https://github.com/Panacota96/rv-imgauth/issues/33)) ([7d20a64](https://github.com/Panacota96/rv-imgauth/commit/7d20a6426cd34ead57cea1d286e49a14f76e4eb3))
+* **trust:** reject malformed timestamp times instead of panicking; require the nonce ([#31](https://github.com/Panacota96/rv-imgauth/issues/31)) ([1f346fa](https://github.com/Panacota96/rv-imgauth/commit/1f346fab26999c650f7fc19dc36eb1b306757f2a))
+
 ## [0.4.1](https://github.com/Panacota96/rv-imgauth/compare/v0.4.0...v0.4.1) (2026-11-24)
 
 
