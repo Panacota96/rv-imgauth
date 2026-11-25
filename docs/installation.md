@@ -46,7 +46,7 @@ Release assets on the GitHub Releases page of the repository (`Panacota96/rv-img
 
 | Asset | What it is |
 | --- | --- |
-| `rv-imgauth-X.Y.Z-windows-x64.zip` | Portable: `rv-imgauth.exe`, `rv-imgauth-gui.exe`, README, LICENSE, NOTICE, CHANGELOG, `docs/`, `examples/` (sample evidence, expected results and run scripts) |
+| `rv-imgauth-X.Y.Z-windows-x64.zip` | Portable: `rv-imgauth.exe`, `rv-imgauth-gui.exe`, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG, `docs/`, `examples/` (sample evidence, expected results and run scripts) |
 | `rv-imgauth-X.Y.Z-windows-x64-setup.exe` | Inno Setup installer, per-user |
 | `SHA256SUMS` | SHA-256 of the zip, the installer and the SBOM (`sha256sum` format: `<hash>  ./<file>`) |
 | `sbom.cdx.json` | CycloneDX software bill of materials (every Rust dependency and version) |
@@ -166,7 +166,7 @@ Unattended:
 .\rv-imgauth-0.1.0-windows-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS="addtopath"
 ```
 
-The installer copies the executables, README, LICENSE, NOTICE, CHANGELOG, `docs\` and the sample evidence
+The installer copies the executables, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG, `docs\` and the sample evidence
 (`examples\sample\evidence\`), not the sample scripts or `expected_hashes.csv` (those are in the zip and the
 source tree).
 
@@ -299,7 +299,7 @@ the same build (fixed encoder, scalar decoder), which `tests/run_samples.py` che
 
 | What | Location |
 | --- | --- |
-| Program (installer) | `%LOCALAPPDATA%\Programs\Rakvor\RV ImgAuth\` (`rv-imgauth.exe`, `rv-imgauth-gui.exe`, README, LICENSE, NOTICE, CHANGELOG, `docs\`, `examples\sample\evidence\`, `unins000.exe`) |
+| Program (installer) | `%LOCALAPPDATA%\Programs\Rakvor\RV ImgAuth\` (`rv-imgauth.exe`, `rv-imgauth-gui.exe`, README, LICENSE, COMMERCIAL.md, NOTICE, CHANGELOG, `docs\`, `examples\sample\evidence\`, `unins000.exe`) |
 | Program (portable) | the folder you extracted |
 | PATH entry (installer task) | user environment variable `Path` (`HKCU\Environment`); removed by the uninstaller |
 | Run outputs | `--out` (default `.\rakvor-out` **relative to the current folder**): `logs\<RUN-ID>\`, `reports\<RUN-ID>\`. The GUI uses its *Output folder* field |
