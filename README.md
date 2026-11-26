@@ -2,6 +2,8 @@
 
 # RV ImgAuth
 
+**English** · [Español](README.es.md) · [Français](README.fr.md)
+
 <!-- forge:description -->
 **Finds the signals of modification in photos and screenshots.** RV ImgAuth examines JPEG, HEIC/HEIF, PNG and WebP images — file structure, metadata, compression fingerprints, double compression, visual maps (ELA, noise, JPEG ghosts), copy-move, the embedded thumbnail and known reference images — and reports what each signal shows and what it does not prove. It never gives a verdict.
 <!-- /forge:description -->
@@ -121,6 +123,7 @@ rv-imgauth fingerprints learn originals\*.jpg --label "Phone X camera" --categor
 rv-imgauth verify-log rakvor-out\logs\<RUN-ID>
 ```
 
+The common tasks, step by step: [docs/quick-guide.md](docs/quick-guide.md).
 Every option: [docs/usage-cli.md](docs/usage-cli.md) (generated from `--help`). The desktop app and its image
 viewer: [docs/usage-gui.md](docs/usage-gui.md). A ready-made synthetic sample: [examples/](examples/README.md).
 
@@ -164,6 +167,7 @@ flowchart TB
 
 | Page | For |
 | --- | --- |
+| [docs/quick-guide.md](docs/quick-guide.md) | The six common tasks (analyze, case folder, verify-log, verify-case, timestamp, fingerprints), every GUI button, exit codes |
 | [docs/theory.md](docs/theory.md) | Why each analysis works: plain language for clients, lawyers and judges; algorithms, parameters and references for examiners |
 | [docs/admissibility.md](docs/admissibility.md) | Colombia, France/EU, ISO, SWGDE, US/UK requirements mapped to features; gaps; examiner checklist (draft pending legal review) |
 | [docs/installation.md](docs/installation.md) | Installing on Windows 10/11, verifying the release, building from source |
@@ -176,6 +180,9 @@ flowchart TB
 | [docs/forensic-audit.md](docs/forensic-audit.md) | Audit log, review log, timestamp, signed reports, custody forms |
 | [docs/development.md](docs/development.md) · [docs/release-process.md](docs/release-process.md) | Building, testing, releasing |
 | [docs/adr/](docs/adr/) | Architecture decisions |
+
+The README, the quick guide, the usage guide, the desktop-app guide and the installation guide also exist in Spanish
+(`.es.md`) and French (`.fr.md`); the English pages are the reference.
 
 ## Project layout
 
@@ -193,6 +200,7 @@ rv-imgauth/
 ├── docs/          documentation (Mermaid diagrams render on GitHub)
 ├── tests/         samples generators, oracles (Pillow, ExifTool, numpy), chain verifier
 ├── fuzz/          cargo-fuzz targets for the parsers
+├── scripts/       docs checks (translations keep the shape of the English pages)
 ├── examples/      synthetic sample evidence, run scripts, expected findings and hashes
 ├── packaging/     Windows installer (Inno Setup), Rakvor code-signing root
 └── .github/       CI, fuzzing and release workflows

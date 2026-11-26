@@ -1,8 +1,8 @@
 # Usage guide: from intake to a verified report
 
 This guide follows one case end to end: intake of the evidence, analysis of the images, looking at the maps,
-reading the findings, and verifying the run. Every option of every command is in
-[usage-cli.md](usage-cli.md) (generated from `--help`); the desktop app is in [usage-gui.md](usage-gui.md); why each
+reading the findings, and verifying the run. The common tasks in short are in [quick-guide.md](quick-guide.md);
+every option of every command is in [usage-cli.md](usage-cli.md) (generated from `--help`); the desktop app is in [usage-gui.md](usage-gui.md); why each
 analysis works is in [theory.md](theory.md).
 
 ```mermaid
