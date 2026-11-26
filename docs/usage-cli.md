@@ -329,12 +329,16 @@ EXAMPLES:
   Compare with known originals from the same camera:
     rv-imgauth analyze -i IMG_0042.jpg --reference ref/IMG_0040.jpg --reference ref/IMG_0041.jpg
   Verify the audit log afterwards:
-    rv-imgauth verify-log rakvor-out/logs/<RUN-ID>/audit.jsonl
+    rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
   Analyse every item registered in a case folder (after rv-hashinv intake), then verify the case:
     rv-imgauth analyze --case-dir E:\CASE-014
     rv-imgauth verify-case E:\CASE-014
   Analyse two registered items of the case only:
     rv-imgauth analyze --case-dir E:\CASE-014 --evidence E0001,E0002
+  Offline lab: no timestamp request now; add it later with `rv-imgauth timestamp <LOG>`:
+    rv-imgauth analyze -i D:\evidence -r --no-timestamp
+  The summary starts with DONE, "DONE (high-severity findings)" (exit code 3) or CANCELLED,
+  then gives the counts, the timestamp status and the report and log folders.
 
 EXIT CODES:
   0    Completed; no high-severity finding.
@@ -432,9 +436,13 @@ DESCRIPTION:
   Nothing is ever sent anywhere: learning only reads the files you name.
 
 EXAMPLES:
-  rv-imgauth fingerprints learn originals/*.jpg --label "Phone X camera" --category camera
-  rv-imgauth fingerprints list --db local
-  rv-imgauth fingerprints export --out lab-fingerprints-2026-10.json
+  Learn a camera from two photos you took with it yourself:
+    rv-imgauth fingerprints learn originals/IMG_0001.jpg originals/IMG_0002.jpg --label "Phone X
+    camera" --category camera
+  List what this workstation has learned (version and SHA-256 of the database):
+    rv-imgauth fingerprints list --db local
+  Export the local database for another PC or for disclosure:
+    rv-imgauth fingerprints export --out lab-fingerprints-2026-10.json
 ```
 
 ### rv-imgauth fingerprints learn
@@ -494,8 +502,12 @@ FORENSIC NOTES:
   - The DB SHA-256 printed here appears in every report that used the database.
 
 EXAMPLES:
-  rv-imgauth fingerprints learn IMG_0001.jpg --label "Phone X camera" --category camera
-  rv-imgauth fingerprints learn a.jpg b.jpg --label "Messenger Y" --category messenger --case LAB-01
+  Learn a camera from one photo you took with it:
+    rv-imgauth fingerprints learn IMG_0001.jpg --label "Phone X camera" --category camera
+  Learn from two files, naming the case they come from and the examiner:
+    rv-imgauth fingerprints learn a.jpg b.jpg --label "Messenger Y" --category messenger --case
+    LAB-01 --actor "Ana Ruiz"
+  The output names the entry and prints the database SHA-256 before and after.
 
 EXIT CODES:
   0  Learned (or merged); DB SHA-256 before/after printed.
@@ -520,8 +532,11 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-imgauth fingerprints list
-  rv-imgauth fingerprints list --db local
+  Every database (bundled starter, local learned):
+    rv-imgauth fingerprints list
+  Only the entries learned on this workstation, or only the bundled ones:
+    rv-imgauth fingerprints list --db local
+    rv-imgauth fingerprints list --db starter
 
 EXIT CODES:
   0  Listed.
@@ -550,7 +565,8 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-imgauth fingerprints export --out lab-fingerprints-2026-10.json
+  Write the local database to a new file (an existing file is never overwritten):
+    rv-imgauth fingerprints export --out lab-fingerprints-2026-11.json
   rv-imgauth fingerprints export --db starter --out starter.json
 
 EXIT CODES:
@@ -583,9 +599,15 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
-  rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+  Verify a standalone run (its log folder, or the audit.jsonl in it):
+    rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3
+    rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3/audit.jsonl
+  Verify a run inside a case folder:
+    rv-imgauth verify-log E:\CASE-014\runs\rv-imgauth\20261019T101500Z-a1b2c3\logs
+  Also validate the TSA certificate chain against the TSA's own root certificates:
+    rv-imgauth verify-log rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-ca digicert-tsa-roots.pem
+  An intact log prints "OK  <N> entries, chain intact", then the timestamp, review and
+  outputs lines; an altered one prints BROKEN and one line per problem (exit code 3).
 
 TIMESTAMP CHECKS:
   Driven by the log: every token a timestamp_obtained entry records must still be next to it
@@ -636,7 +658,8 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-imgauth self-test
+  Check this build before casework (one PASS or FAIL line per algorithm):
+    rv-imgauth self-test
 
 EXIT CODES:
   0  All algorithms give the published answer for the input "abc".
@@ -671,8 +694,13 @@ Options:
           Print help (see a summary with '-h')
 
 EXAMPLES:
-  rv-imgauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3
-  rv-imgauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-url https://freetsa.org/tsr
+  The run was offline (timestamp_pending): add the timestamp once the network is back:
+    rv-imgauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3
+  Use another RFC 3161 authority:
+    rv-imgauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --tsa-url https://freetsa.org/tsr
+  Name the examiner in the new audit entry:
+    rv-imgauth timestamp rakvor-out/logs/20261019T101500Z-a1b2c3 --actor "Ana Ruiz"
+  Success prints "OK  timestamp <TIME> by <TSA> covers entry #<N>"; then run verify-log.
 
 EXIT CODES:
   0  Timestamp obtained and logged.
@@ -710,7 +738,10 @@ CHECKS:
     replaced: a problem).
 
 EXAMPLES:
-  rv-imgauth verify-case E:\CASE-014
+  Check the case log, the registry and every run (and its review log) of the case:
+    rv-imgauth verify-case E:\CASE-014
+  An intact case prints "OK  case <ID>: ..." and an outputs line; a failed check prints
+  BROKEN and one line per problem (exit code 3).
 
 EXIT CODES:
   0  The case folder is intact (warnings, e.g. a run still in progress, are printed).
@@ -746,8 +777,10 @@ OFF SWITCH:
   %APPDATA%\Rakvor (RV Hub's setting), turns the check off for every Rakvor tool.
 
 EXAMPLES:
-  rv-imgauth update-check
-  rv-imgauth update-check --json
+  Ask whether a newer release is published (one line):
+    rv-imgauth update-check
+  The same answer as JSON, for scripts:
+    rv-imgauth update-check --json
 
 EXIT CODES:
   0  This is the latest release, or the check is turned off.
@@ -780,7 +813,8 @@ DESCRIPTION:
   gui_exe, exit_codes. Nothing is read or written; no audit log is created.
 
 EXAMPLES:
-  rv-imgauth describe --json
+  Print the description that RV Hub reads:
+    rv-imgauth describe --json
 
 EXIT CODES:
   0  The description was printed.
